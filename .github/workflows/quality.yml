@@ -80,6 +80,15 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
+      - name: Checkout workflow diagnostics
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Manual release retries may update CI while keeping the tagged app source fixed.
+          ref: ${{ github.workflow_sha }}
+          path: ci-tools
+          sparse-checkout: scripts/run-android-tests.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Setup Java 21
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
@@ -109,10 +118,7 @@ jobs:
           profile: pixel_2
           disable-animations: false
           emulator-options: -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -camera-back emulated
-          script: |
-            mkdir -p app/build/reports/instrumentation
-            adb logcat -c
-            set +e; ./gradlew --no-daemon :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=dev.uednd.hydros.CellularRecoveryTest; result=$?; adb logcat -d > app/build/reports/instrumentation/logcat.txt; exit "$result"
+          script: bash ci-tools/scripts/run-android-tests.sh
       - name: Upload UI reports and logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
