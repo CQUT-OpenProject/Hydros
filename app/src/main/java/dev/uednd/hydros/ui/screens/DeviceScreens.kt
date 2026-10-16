@@ -38,8 +38,9 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
                 SessionStage.WRITEBACK_PENDING -> "原设备消费记录待清除，请先返回处理"
             } else null
         }
-        device.status == DeviceStatus.BUSY && state.connectionStage == ConnectionStage.READY -> null
-        device.status == DeviceStatus.OFFLINE && state.connectionStage !in listOf(ConnectionStage.CONNECTING, ConnectionStage.FAILED) -> "设备暂时离线，请稍后重试或选择其他设备"
+        state.connectingId == device.id && state.connectionStage != ConnectionStage.IDLE -> null
+        device.status == DeviceStatus.BUSY -> "设备正在使用，请选择其他设备"
+        device.status == DeviceStatus.OFFLINE -> "设备暂时离线，请稍后重试或选择其他设备"
         else -> null
     }
     SnackbarMessage(restriction, eventKey = device?.id to restriction)
@@ -89,14 +90,14 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
             }
             when {
                 state.session != null -> SecondaryAction("返回使用页面", onClick = onSession)
-                device.status == DeviceStatus.BUSY && state.connectionStage == ConnectionStage.READY -> PrimaryAction("核实并恢复本人订单", enabled=!state.working) { onStart(device) }
-                device.status == DeviceStatus.OFFLINE && state.connectionStage != ConnectionStage.CONNECTING && state.connectionStage != ConnectionStage.FAILED -> SecondaryAction("返回", onClick = onBack)
                 state.connectingId == device.id && state.connectionStage == ConnectionStage.CONNECTING -> StateCard("正在连接",
                     state.networkMessage ?: state.connectionMessage ?: "正在核实云端或蓝牙连接…", loading = true)
                 state.connectingId == device.id && state.connectionStage == ConnectionStage.FAILED -> SecondaryAction("重新连接", onClick = { onConnect(device) })
                 state.connectingId == device.id && state.connectionStage == ConnectionStage.READY -> {
-                    HoldActionButton(device.id, enabled = !state.working, working = state.working) { onStart(device) }
+                    if (device.status == DeviceStatus.BUSY) PrimaryAction("核实并恢复本人订单", enabled=!state.working) { onStart(device) }
+                    else HoldActionButton(device.id, enabled = !state.working, working = state.working) { onStart(device) }
                 }
+                device.status == DeviceStatus.OFFLINE && device.channel == ControlChannel.CLOUD && device.isBle != true -> SecondaryAction("返回", onClick = onBack)
                 else -> PrimaryAction("连接设备") { onConnect(device) }
             }
         }

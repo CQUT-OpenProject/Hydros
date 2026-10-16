@@ -1,6 +1,7 @@
 package dev.uednd.hydros.data.repository
 
 import dev.uednd.hydros.data.ble.MacFormat
+import dev.uednd.hydros.data.ble.NearbyScanFailure
 import dev.uednd.hydros.data.ble.NearbyScanner
 import dev.uednd.hydros.data.network.Credentials
 import dev.uednd.hydros.ui.state.DeviceUi
@@ -15,6 +16,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 
 data class NearbyDiscoveryState(
@@ -55,6 +58,8 @@ class NearbyDiscovery(
 
         job = scope.launch {
             val seen = mutableSetOf<String>()
+            // Leave network capacity available for foreground connection/account requests.
+            val lookupSlots = Semaphore(4)
             try {
                 coroutineScope {
                     val queries = this
@@ -66,7 +71,13 @@ class NearbyDiscovery(
                             if (!seen.add(mac)) return@collect
                             queries.launch {
                                 try {
-                                    val device = devices.find(auth, mac, advertisement.mac, advertisement.rssi)
+                                    // Queueing shares the lookup deadline, so a dense scan cannot add
+                                    // an unbounded tail after the radio window has closed.
+                                    val device = withTimeoutOrNull(DEVICE_INFO_TIMEOUT_MS) {
+                                        lookupSlots.withPermit {
+                                            devices.find(auth, mac, advertisement.mac, advertisement.rssi)
+                                        }
+                                    } ?: throw NearbyScanFailure("设备查询超时，请重新扫描")
                                     ensureActive()
                                     if (ownsAttempt()) mutable.value = mutable.value.copy(
                                         devices = mutable.value.devices.filterNot { it.id == device.id } + device,

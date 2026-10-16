@@ -42,7 +42,7 @@ class DeviceDetailTest {
         var returns = 0
         ui.setContent {
             HydrosTheme { HydrosSnackbarProvider { HoldActionHost {
-                DeviceDetailScreen(device, HydrosUiState(session = SessionUi(device, "owner", stage = stage)),
+                DeviceDetailScreen(device, HydrosUiState(session = SessionUi(device.copy(id = "other-device"), "owner", stage = stage)),
                     {}, {}, { returns++ }, {}, {}, { _, _ -> true })
             } } }
         }
@@ -419,5 +419,49 @@ class DeviceDetailTest {
         }
         assertEquals(2, starts)
         ui.mainClock.autoAdvance = true
+    }
+
+    @Test fun offlineDeviceWhenReadyRendersHoldActionButtonWithoutSnackbarRestriction() {
+        val offlineDevice = device.copy(status = DeviceStatus.OFFLINE, channel = ControlChannel.BLE)
+        var stage by mutableStateOf(ConnectionStage.IDLE)
+        ui.setContent {
+            HydrosTheme { HydrosSnackbarProvider { HoldActionHost {
+                DeviceDetailScreen(offlineDevice, HydrosUiState(connectingId = offlineDevice.id, connectionStage = stage),
+                    {}, {}, {}, {}, {}, { _, _ -> true })
+            } } }
+        }
+        ui.onNodeWithText("连接设备").assertExists()
+        ui.onNodeWithText("设备暂时离线，请稍后重试或选择其他设备").assertExists()
+
+        ui.runOnIdle { stage = ConnectionStage.READY }
+        ui.onNodeWithTag("hold-to-start").assertExists()
+        ui.onNodeWithText("设备暂时离线，请稍后重试或选择其他设备").assertDoesNotExist()
+    }
+
+    @Test fun busyDeviceOnlyRendersRecoverActionWhenThisDeviceIsReady() {
+        val busyDevice = device.copy(status = DeviceStatus.BUSY)
+        var connectingId by mutableStateOf<String?>(null)
+        var stage by mutableStateOf(ConnectionStage.IDLE)
+        ui.setContent {
+            HydrosTheme { HydrosSnackbarProvider { HoldActionHost {
+                DeviceDetailScreen(busyDevice, HydrosUiState(connectingId = connectingId, connectionStage = stage),
+                    {}, {}, {}, {}, {}, { _, _ -> true })
+            } } }
+        }
+        ui.onNodeWithText("连接设备").assertExists()
+        ui.onNodeWithText("核实并恢复本人订单").assertDoesNotExist()
+
+        ui.runOnIdle {
+            connectingId = "other-device"
+            stage = ConnectionStage.READY
+        }
+        ui.onNodeWithText("核实并恢复本人订单").assertDoesNotExist()
+        ui.onNodeWithText("连接设备").assertExists()
+
+        ui.runOnIdle {
+            connectingId = busyDevice.id
+            stage = ConnectionStage.READY
+        }
+        ui.onNodeWithText("核实并恢复本人订单").assertExists()
     }
 }

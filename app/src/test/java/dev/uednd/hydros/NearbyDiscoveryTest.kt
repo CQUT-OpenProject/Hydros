@@ -163,6 +163,82 @@ class NearbyDiscoveryTest {
         assertEquals("not registered", discovery.state.value.error?.message)
     }
 
+    @Test fun denseScanLimitsConcurrentRequestsAndStillResolvesQueuedDevices() = runTest {
+        val scanner = ScriptScanner()
+        val gates = List(12) { CompletableDeferred<Unit>() }
+        var active = 0
+        var maximum = 0
+        var started = 0
+        val discovery = NearbyDiscovery(scanner, lookup { mac, _, _ ->
+            val index = started++
+            active++
+            maximum = maxOf(maximum, active)
+            try { gates[index].await(); device(mac) } finally { active-- }
+        }, MutableStateFlow(auth), backgroundScope)
+        discovery.start()
+        runCurrent()
+        repeat(12) { scanner.emit("%012X".format(it + 1)) }
+        runCurrent()
+        assertEquals(4, started)
+        assertEquals(4, maximum)
+        // Accepted work still drains after scanning itself has stopped.
+        advanceTimeBy(15_000)
+        runCurrent()
+        assertEquals(0, scanner.active)
+        gates.forEach { it.complete(Unit) }
+        runCurrent()
+        assertEquals(12, discovery.state.value.devices.size)
+        assertEquals(4, maximum)
+        assertEquals(0, active)
+        assertFalse(discovery.state.value.searching)
+    }
+
+    @Test fun queuedLookupsShareDeadlineSoDenseScansCannotKeepSearchingIndefinitely() = runTest {
+        val scanner = ScriptScanner()
+        var started = 0
+        var cancelled = 0
+        val discovery = NearbyDiscovery(scanner, lookup { _, _, _ ->
+            started++
+            try { awaitCancellation() } finally { cancelled++ }
+        }, MutableStateFlow(auth), backgroundScope)
+        discovery.start()
+        runCurrent()
+        repeat(12) { scanner.emit("%012X".format(it + 1)) }
+        runCurrent()
+        advanceTimeBy(18_000)
+        runCurrent()
+        assertEquals(4, started)
+        assertEquals(4, cancelled)
+        assertEquals(0, scanner.active)
+        assertFalse(discovery.state.value.searching)
+        assertTrue(discovery.state.value.completed)
+        assertEquals("设备查询超时，请重新扫描", discovery.state.value.error?.message)
+    }
+
+    @Test fun stoppingDenseScanCancelsActiveAndQueuedLookups() = runTest {
+        val scanner = ScriptScanner()
+        var started = 0
+        var cancelled = 0
+        val discovery = NearbyDiscovery(scanner, lookup { _, _, _ ->
+            started++
+            try { awaitCancellation() } finally { cancelled++ }
+        }, MutableStateFlow(auth), backgroundScope)
+        discovery.start()
+        runCurrent()
+        repeat(12) { scanner.emit("%012X".format(it + 1)) }
+        runCurrent()
+        discovery.stop()
+        runCurrent()
+        assertEquals(4, started)
+        assertEquals(4, cancelled)
+        advanceTimeBy(18_000)
+        runCurrent()
+        assertEquals(4, started)
+        assertEquals(0, scanner.active)
+        assertFalse(discovery.state.value.completed)
+        assertNull(discovery.state.value.error)
+    }
+
     private fun lookup(find: suspend (String, String?, Int?) -> DeviceUi) = object : DeviceRepository {
         override suspend fun find(auth: Credentials, mac: String, scanMac: String?, rssi: Int?) = find(mac, scanMac, rssi)
         override suspend fun prepare(auth: Credentials, device: DeviceUi, preferBle: Boolean) = error("not used")

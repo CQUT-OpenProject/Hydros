@@ -10,6 +10,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.net.SocketTimeoutException
 import kotlinx.serialization.json.JsonObject
 
+internal const val DEVICE_INFO_TIMEOUT_MS = 18_000L
+
 sealed interface RunningOrder {
     data class Running(val orderNo: String?, val owner: Boolean?) : RunningOrder
     data object Ended : RunningOrder
@@ -42,12 +44,58 @@ class RealDeviceRepository(
     private val operation: Mutex,
     private val now: () -> Long = { System.nanoTime() / 1_000_000 },
 ) : DeviceRepository {
-    private data class DeviceInfoSnapshot(val auth: Credentials, val device: DeviceUi, val at: Long)
+    private data class DeviceInfoSnapshot(
+        val auth: Credentials, val device: DeviceUi, val lookupMac: String, val at: Long,
+    )
+    private data class LookupKey(val auth: Credentials, val mac: String)
+    private class LookupGate(val mutex: Mutex = Mutex(), var users: Int = 0)
     private val infoCache = linkedMapOf<String, DeviceInfoSnapshot>()
+    private val lookups = mutableMapOf<LookupKey, LookupGate>()
+
+    private fun DeviceInfoSnapshot.isFresh(auth: Credentials): Boolean =
+        this.auth == auth && now() - at in 0..30_000
 
     override suspend fun find(auth: Credentials, mac: String, scanMac: String?, rssi: Int?): DeviceUi =
-        withTimeoutOrNull(18_000) { loadInfo(auth, mac, scanMac, rssi) }
+        withTimeoutOrNull(DEVICE_INFO_TIMEOUT_MS) { findInfo(auth, mac, scanMac, rssi) }
             ?: throw NetworkFailure("设备查询超时，可重新查询，无需再次扫码", SocketTimeoutException())
+
+    /** Same-address callers share the successful lookup; cancellation leaves no detached request. */
+    private suspend fun findInfo(auth: Credentials, mac: String, scanMac: String? = null,
+        rssi: Int? = null, fallbackConnectMac: String? = null): DeviceUi {
+        val canonical = MacFormat.normalize(mac) ?: throw ApiFailure(null, "设备地址无效")
+        val key = LookupKey(auth, canonical)
+        val gate = synchronized(infoCache) {
+            lookups.getOrPut(key) { LookupGate() }.also { it.users++ }
+        }
+        try {
+            return gate.mutex.withLock {
+                val cached = synchronized(infoCache) {
+                    infoCache.values.lastOrNull {
+                        it.isFresh(auth) && (canonical == it.lookupMac ||
+                            canonical == MacFormat.normalize(it.device.ledgerMac) ||
+                            canonical == MacFormat.normalize(it.device.connectMac))
+                    }
+                }
+                if (cached == null) return@withLock loadInfo(auth, canonical, scanMac, rssi, fallbackConnectMac)
+                val device = cached.device.copy(
+                    connectMac = scanMac ?: cached.device.connectMac,
+                    signal = rssi?.let { "$it dBm" } ?: cached.device.signal,
+                )
+                if (device != cached.device) {
+                    store.updateAccount(auth.key) { account -> account.copy(
+                        devices = account.devices.filterNot { it.id == device.id } + device,
+                    ) }
+                    synchronized(infoCache) {
+                        // Observing another advertisement must not extend server-data freshness.
+                        if (infoCache[device.id] === cached) infoCache[device.id] = cached.copy(device = device)
+                    }
+                }
+                device
+            }
+        } finally {
+            synchronized(infoCache) { if (--gate.users == 0) lookups.remove(key) }
+        }
+    }
 
     private suspend fun loadInfo(auth: Credentials, mac: String, scanMac: String? = null,
         rssi: Int? = null, fallbackConnectMac: String? = null): DeviceUi {
@@ -71,17 +119,18 @@ class RealDeviceRepository(
             obj.text("bigTypeId"), obj.text("smallTypeId"), obj.flag("isBle"))
         store.updateAccount(auth.key) { it.copy(devices = it.devices.filterNot { d -> d.id == sn } + device) }
         synchronized(infoCache) {
-            infoCache[device.id] = DeviceInfoSnapshot(auth, device, now())
+            infoCache[device.id] = DeviceInfoSnapshot(auth, device, canonical, now())
             if (infoCache.size > 32) infoCache.remove(infoCache.keys.first())
         }
         return device
     }
     override suspend fun prepare(auth: Credentials, device: DeviceUi, preferBle: Boolean): DeviceUi = operation.withLock {
+        if (store.account(auth.key).session != null) throw ApiFailure(null, "请先处理当前设备会话")
         val cached = synchronized(infoCache) { infoCache[device.id] }
         val fresh = cached?.takeIf {
-            it.auth == auth && it.device.ledgerMac == device.ledgerMac && now() - it.at in 0..30_000
-        }?.device ?: withTimeoutOrNull(18_000) {
-            loadInfo(auth, device.ledgerMac, fallbackConnectMac = device.connectMac)
+            it.isFresh(auth) && it.device.ledgerMac == device.ledgerMac
+        }?.device ?: withTimeoutOrNull(DEVICE_INFO_TIMEOUT_MS) {
+            findInfo(auth, device.ledgerMac, fallbackConnectMac = device.connectMac)
         } ?: throw NetworkFailure("设备查询超时，请重新连接")
         val knownBle = fresh.isBle == true || fresh.channel == ControlChannel.BLE || preferBle
         if(!knownBle) {
@@ -94,7 +143,8 @@ class RealDeviceRepository(
             }
         }
         try {
-            when (val result = ble.connectWithRetry(fresh.connectMac)) {
+            when (val result = if (ble.isConnectedTo(fresh.connectMac)) BleConnectResult.Ready
+                else ble.connectWithRetry(fresh.connectMac)) {
                 BleConnectResult.Ready -> Unit
                 BleConnectResult.NoService -> {
                     // Only positive service discovery disproves an earlier remembered BLE choice.
@@ -126,6 +176,11 @@ class RealDeviceRepository(
     private suspend fun remember(auth: Credentials, device: DeviceUi): DeviceUi {
         store.updateAccount(auth.key) { it.copy(devices=it.devices.filterNot { d -> d.id == device.id } + device,
             recent=listOf(device.id) + it.recent.filterNot { id -> id == device.id }) }
+        synchronized(infoCache) {
+            infoCache[device.id]?.takeIf { it.auth == auth }?.let {
+                infoCache[device.id] = it.copy(device = device)
+            }
+        }
         return device
     }
 }

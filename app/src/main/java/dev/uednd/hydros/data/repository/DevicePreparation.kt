@@ -73,6 +73,12 @@ class DevicePreparation(
         job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 previous?.join()
+                ensureActive()
+                if (attempt !== next || auth.credentials.value != credentials) return@launch
+                if (sessions.session.value != null) {
+                    mutable.value = DevicePreparationState()
+                    return@launch
+                }
                 val ready = devices.prepare(credentials, device, preferBle = forceBle)
                 val saved = store.account(credentials.key)
                 ensureActive()
@@ -123,6 +129,6 @@ class DevicePreparation(
             prepare(device, true)
             return
         }
-        cancel()
+        if (attempt === owner) cancel()
     }
 }

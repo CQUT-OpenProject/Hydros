@@ -5,6 +5,7 @@ import dev.uednd.hydros.data.HydrosDependencies
 import dev.uednd.hydros.data.network.Credentials
 import dev.uednd.hydros.data.repository.*
 import dev.uednd.hydros.ui.state.HydrosViewModel
+import dev.uednd.hydros.ui.state.ConnectionStage
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.test.*
@@ -42,10 +43,13 @@ class NearbyDiscoveryViewModelTest {
             runCurrent()
             assertEquals("registered", model.state.value.nearby.devices.single().id)
             assertEquals("registered", model.state.value.devices.single().id)
-            model.stopDiscovery()
+            model.connect(model.state.value.devices.single())
             runCurrent()
             assertEquals(0, scanner.active)
             assertEquals("registered", model.state.value.nearby.devices.single().id)
+            assertEquals(ConnectionStage.READY, model.state.value.connectionStage)
+            model.cancelConnection()
+            runCurrent()
             model.discoverNearby()
             runCurrent()
             auth.logout()
