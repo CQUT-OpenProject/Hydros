@@ -50,25 +50,26 @@ class ScriptTransport : CampusTransport {
 fun response(data: String?=null, code: Int=0) = ApiResponse(success=code==0, errorCode=code, data=data?.let(Json::parseToJsonElement))
 class ScriptBle : BlePort {
     override var ready=true
+    override var connectedMac: String?=null
     var state=DeviceQueryState("20","ABCDEF01",0,1,2)
     var acknowledgeRate=true
     var acknowledgeClose=true
     var acknowledgeBack=true
     var rates=0; var closes=0; var backs=0
     var beforeRate: (() -> Unit)?=null
-    override suspend fun connect(mac: String): BleConnectResult { ready=true; return BleConnectResult.Ready }
+    override suspend fun connect(mac: String): BleConnectResult { connectedMac=mac; ready=true; return BleConnectResult.Ready }
     override suspend fun query()=state
     override suspend fun writeRate(bytes: ByteArray): Boolean { beforeRate?.invoke(); rates++; state=state.copy(state=1); return acknowledgeRate }
     override suspend fun closeValve(): Boolean { closes++; if(acknowledgeClose) state=state.copy(state=3); return acknowledgeClose }
     override suspend fun collect()=byteArrayOf(0xAA.toByte(),0xBB.toByte())
     override suspend fun writeBack(bytes: ByteArray): Boolean { backs++; if(acknowledgeBack) state=state.copy(state=0); return acknowledgeBack }
-    override fun disconnect() { ready=false }
+    override fun disconnect() { ready=false; connectedMac=null }
 }
 class SessionRepositoryTest {
     private val auth=Credentials("key","1","2","3","13800138000")
     private fun device(channel: ControlChannel)=DeviceUi("AABBCCDDEEFF","真实水表","宿舍",DeviceCategory.SHOWER,
         channel=channel, deviceId="7", ledgerMac="AABBCCDDEEFF",connectMac="AA:BB:CC:DD:EE:FF",bigTypeId="4",smallTypeId="1")
-    private fun repo(t: ScriptTransport,s: MemoryStore,b: ScriptBle)=RealSessionRepository(t,s,b,Mutex(),2,{})
+    private fun repo(t: ScriptTransport,s: MemoryStore,b: BlePort)=RealSessionRepository(t,s,b,Mutex(),2,{})
     @Test fun unconfirmedCloudStartPersistsAndDoesNotAllowSecondStart()=runTest {
         val t=ScriptTransport(); val s=MemoryStore(); val b=ScriptBle(); val r=repo(t,s,b)
         t.script={path,_-> when { path.endsWith("downRateResult") -> response(code=1); else -> response() } }
@@ -164,6 +165,49 @@ class SessionRepositoryTest {
         val ready=RealDeviceRepository(t,s,b,Mutex()).prepare(auth,device(ControlChannel.UNKNOWN))
         assertEquals(ControlChannel.CLOUD,ready.channel)
         assertEquals(DeviceStatus.OFFLINE,ready.status)
+    }
+    @Test fun cloudSettlementSupportsDecimalConsumeMoney()=runTest {
+        val t=ScriptTransport(); val s=MemoryStore(); val r=repo(t,s,ScriptBle())
+        s.updateAccount(auth.key) { it.copy(session=SessionUi(device(ControlChannel.CLOUD),auth.key,stage=SessionStage.USING,orderNo="own")) }; r.restore(auth)
+        t.script={path,_-> if(path.contains("consumeOrder")) response("""{"orderNo":"own","consumeMoney":"0.50"}""") else response() }
+        r.finish(auth); assertNull(r.session.value); assertNull(s.account(auth.key).session)
+    }
+    @Test fun bleSettlementSupportsDecimalConsumeMoney()=runTest {
+        val s=MemoryStore(); val t=ScriptTransport(); val b=ScriptBle()
+        val r=repo(t,s,b)
+        s.updateAccount(auth.key) { it.copy(session=SessionUi(device(ControlChannel.BLE),auth.key,stage=SessionStage.SETTLEMENT_PENDING,orderNo="own",consumeDate="20261014120000",rateAttempted=true,uploadAttempted=true)) }
+        r.restore(auth)
+        t.script={_,_-> response("""{"orderNo":"own","consumeMoney":"1.25","clData":"${encryptedBack()}"}""") }
+        r.finish(auth)
+        assertNull(r.session.value); assertNull(s.account(auth.key).session)
+    }
+    @Test fun bleStartInvalidDownDataReportsFailureAndClearsWithoutLingeringSession()=runTest {
+        val s=MemoryStore(); val t=ScriptTransport(); val b=ScriptBle(); val r=repo(t,s,b)
+        t.script={path,_-> when {
+            path.contains("rateOrder") -> response("""{"downData":null,"consumeDate":"20261014120000","orderNo":"own"}""")
+            path.contains("upload/bluetooth/fail") -> response()
+            else -> response()
+        }}
+        val failure = runCatching { r.start(auth, device(ControlChannel.BLE)) }.exceptionOrNull()
+        assertTrue(failure is ApiFailure)
+        assertEquals("费率数据无效，未写入设备", failure?.message)
+        assertNull(r.session.value)
+        assertNull(s.account(auth.key).session)
+        assertEquals(1, t.requests.count { it.first.contains("upload/bluetooth/fail") })
+    }
+    @Test fun bleFinishCollectFailureDoesNotReportFailureToServer()=runTest {
+        val s=MemoryStore(); val t=ScriptTransport()
+        val b=object : BlePort by ScriptBle() {
+            override suspend fun collect(): ByteArray? = null
+        }
+        val r=repo(t,s,b)
+        s.updateAccount(auth.key) { it.copy(session=SessionUi(device(ControlChannel.BLE),auth.key,stage=SessionStage.USING,orderNo="own",consumeDate="20261014120000",rateAttempted=true)) }
+        r.restore(auth)
+        val failure = runCatching { r.finish(auth) }.exceptionOrNull()
+        assertTrue(failure is ApiFailure)
+        assertEquals(SessionStage.SETTLEMENT_PENDING, r.session.value?.stage)
+        assertFalse(r.session.value?.failureReportPending == true)
+        assertEquals(0, t.requests.count { it.first.contains("upload/bluetooth/fail") })
     }
     @Test fun findTranslatesPublicLedgerMacToConnectAddress()=runTest {
         val s=MemoryStore(); val t=ScriptTransport(); val b=ScriptBle()

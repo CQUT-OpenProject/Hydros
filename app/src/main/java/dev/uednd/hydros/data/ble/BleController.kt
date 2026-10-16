@@ -51,11 +51,13 @@ class BleController(private val context: Context) {
     @Volatile private var notifySignal: CompletableDeferred<Boolean>? = null
 
     @Volatile private var ready = false
+    @Volatile private var connectionAddress: String? = null
+
+    val connectedMac: String? get() = connectionAddress?.takeIf { ready }
 
     @Volatile private var sawNoService = false
 
     val isReady: Boolean get() = ready
-    val isBluetoothOn: Boolean get() = adapter?.isEnabled == true
 
     private fun normalizeMac(raw: String): String? {
         val plain = raw.replace(":", "").replace("-", "").uppercase()
@@ -80,6 +82,7 @@ class BleController(private val context: Context) {
         }
 
         disconnect()
+        connectionAddress = normalized
         ready = false
         sawNoService = false
         val notifyDone = CompletableDeferred<Boolean>()
@@ -117,6 +120,7 @@ class BleController(private val context: Context) {
 
     fun disconnect() {
         ready = false
+        connectionAddress = null
         val previous = gatt
         gatt = null
         commands?.onDisconnected()

@@ -20,7 +20,8 @@ class SessionRecoveryTest {
     private val auth = Credentials("key", "1", "2", "3", "13800138000")
     private val startedAt = LocalDateTime.of(2026, 10, 16, 12, 0)
         .atZone(ZoneId.of("Asia/Shanghai")).toInstant().toEpochMilli()
-    private val device = DeviceUi("water", "水表", "宿舍", DeviceCategory.SHOWER)
+    private val device = DeviceUi("water", "水表", "宿舍", DeviceCategory.SHOWER,
+        connectMac="AA:BB:CC:DD:EE:FF")
 
     private suspend fun restored(store: MemoryStore, transport: ScriptTransport, ble: BlePort,
         channel: ControlChannel, stage: SessionStage = SessionStage.USING, order: String = "own",
@@ -231,5 +232,36 @@ class SessionRecoveryTest {
         repo.reconcile(auth)
         assertNull(repo.session.value)
         assertFalse(transport.requests.any { it.first.endsWith("closeOrder") })
+    }
+
+    @Test fun idleBleRecoversWithDecimalConsumeMoney() = runTest {
+        val store = MemoryStore()
+        val transport = ScriptTransport().apply {
+            script = { _, fields ->
+                assertEquals("own", fields["orderNo"])
+                response("""{"orderNo":"own","consumeMoney":"0.50"}""")
+            }
+        }
+        val ble = ScriptBle()
+        val repo = restored(store, transport, ble, ControlChannel.BLE, SessionStage.USING)
+        repo.reconcile(auth)
+        assertNull(repo.session.value)
+        assertNull(store.account(auth.key).session)
+    }
+
+    @Test fun cloudMissingOrderRecoversWithServerClockSkew() = runTest {
+        val store = MemoryStore()
+        val transport = ScriptTransport().apply {
+            script = { path, _ -> when {
+                // 10 seconds before startedAt (2026-10-16 12:00:00 -> 2026-10-16 11:59:50) due to clock skew
+                path.endsWith("downRateResult") -> response("""{"state":1,"result":0,"orderNo":"own","consumeDate":"20261016115950"}""")
+                path.contains("consumeOrder") -> response("""{"orderNo":"own","consumeMoney":"0.50"}""")
+                else -> response()
+            } }
+        }
+        val repo = restored(store, transport, ScriptBle(), ControlChannel.CLOUD, SessionStage.OPEN_UNCONFIRMED, order = "")
+        repo.reconcile(auth)
+        assertNull(repo.session.value)
+        assertNull(store.account(auth.key).session)
     }
 }

@@ -31,7 +31,7 @@ data class HydrosUiState(val initializing: Boolean = true, val signedIn: Boolean
     val feedback: FeedbackSettings = FeedbackSettings(),
     val fontSizeScale: Float = 1f,
     val month: String = YearMonth.now().toString(), val billType: BillType = BillType.CONSUMPTION,
-    val loadingWallet: Boolean = false, val loadingBills: Boolean = false,
+    val loadingBills: Boolean = false,
     val networkMessage: String? = null, val connectionMessage: String? = null,
     val walletError: String? = null, val billsError: String? = null, val message: String? = null, val working: Boolean = false)
 class HydrosViewModel(
@@ -91,7 +91,7 @@ class HydrosViewModel(
                 val feedback = graph.store.feedback()
                 val fontSizeScale = graph.store.fontSizeScale()
                 mutable.update { it.copy(theme=theme, onboardingCompleted=onboarding, analyticsEnabled=analyticsEnabled, feedback=feedback, fontSizeScale=fontSizeScale) }
-                graph.auth.restore()
+                graph.restore()
                 graph.auth.authState.collectLatest { authentication ->
                     val auth = authentication.credentials
                     stopDiscovery()
@@ -100,7 +100,7 @@ class HydrosViewModel(
                     walletGeneration++
                     if (authentication.reauthentication != null) {
                         mutable.update { it.copy(signedIn = false, reauthentication = authentication.reauthentication,
-                            initializing = false, loadingWallet = false, loadingBills = false,
+                            initializing = false, loadingBills = false,
                             walletError = null, billsError = null, message = null) }
                         return@collectLatest
                     }
@@ -285,6 +285,7 @@ class HydrosViewModel(
     fun discoverNearby() = discovery.start()
     fun stopDiscovery() = discovery.stop()
     fun connect(device: DeviceUi) {
+        discovery.stop()
         preparation.prepare(device)
     }
     fun cancelConnection() {
@@ -318,7 +319,6 @@ class HydrosViewModel(
         graph.analytics.sessionFinishResult(result, session.device.channel.toAnalyticsChannel(), session.device.category.toAnalyticsType(),
             if (completed) null else FailureCategory.UNKNOWN)
     } }
-    fun reconcile() { graph.scope.launch { action { graph.sessions.reconcile(graph.auth.credentials.value) } } }
     fun refresh() {
         val auth = graph.auth.credentials.value ?: return
         refreshJobs.removeAll { it.isCompleted }
@@ -332,12 +332,12 @@ class HydrosViewModel(
             }
         }
         refreshJobs += viewModelScope.launch {
-            mutable.update { it.copy(loadingWallet=true, walletError=null) }
+            mutable.update { it.copy(walletError=null) }
             try {
                 val wallet=graph.wallet.load(auth)
-                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(wallet=wallet, loadingWallet=false) }
+                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(wallet=wallet) }
             } catch(e: CancellationException) { throw e } catch(e: Exception) {
-                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(loadingWallet=false, walletError=friendly(e)) }
+                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(walletError=friendly(e)) }
             }
         }
         billHistory.refresh()

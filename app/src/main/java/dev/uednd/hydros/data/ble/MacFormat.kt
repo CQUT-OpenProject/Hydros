@@ -25,7 +25,7 @@ object MacFormat {
 
     fun publicAddressOf(mac: String): String? {
         val canon = normalize(mac) ?: return null
-        val first = canon.substring(0, 2).toIntOrNull(16) ?: return null
+        val first = canon.substring(0, 2).toInt(16)
         if (first and 0xC0 == 0) return null
         return (first and 0x3F).toString(16).uppercase().padStart(2, '0') + canon.substring(2)
     }
@@ -33,7 +33,7 @@ object MacFormat {
 
     fun connectAddressFor(ledgerMac: String): String {
         val canon = normalize(ledgerMac) ?: return ledgerMac
-        val first = canon.substring(0, 2).toIntOrNull(16) ?: return ledgerMac
+        val first = canon.substring(0, 2).toInt(16)
         if (first and 0xC0 != 0) return canon
         return (first or 0xC0).toString(16).uppercase().padStart(2, '0') + canon.substring(2)
     }

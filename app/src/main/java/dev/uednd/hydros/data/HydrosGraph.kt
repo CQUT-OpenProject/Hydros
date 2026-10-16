@@ -52,6 +52,8 @@ class HydrosDependencies(
     val networkRecovery: NetworkRecovery? = null,
     val analytics: AnalyticsTracker = NoOpAnalyticsTracker,
 ) {
+    private val restoration = SessionRestoration(auth, sessions)
+    suspend fun restore() = restoration.restore()
     fun sessionMonitor() = SessionMonitor(auth.credentials, sessions, orderPush())
 }
 

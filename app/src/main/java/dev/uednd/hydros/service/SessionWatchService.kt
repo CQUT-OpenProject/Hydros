@@ -63,17 +63,24 @@ class SessionWatchService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "finish") {
-            scope.launch { safely { graph.sessions.finish(graph.auth.credentials.value) } }
+            scope.launch { safely { graph.restore(); graph.sessions.finish(graph.auth.credentials.value) } }
         }
         if (watch == null) {
             watch = scope.launch {
-                graph.sessionMonitor().watch { session ->
-                    getSystemService(NotificationManager::class.java).notify(1, notification(session))
+                try {
+                    safely {
+                        graph.restore()
+                        graph.sessionMonitor().watch { session ->
+                            getSystemService(NotificationManager::class.java).notify(1, notification(session))
+                        }
+                    }
+                } finally {
+                    watch = null
+                    stopSelf()
                 }
-                stopSelf()
             }
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     override fun onDestroy() {
