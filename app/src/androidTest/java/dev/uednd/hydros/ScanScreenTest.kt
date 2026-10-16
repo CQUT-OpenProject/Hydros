@@ -106,4 +106,35 @@ class ScanScreenTest {
             ui.runOnIdle { assertEquals(listOf("device-id"), navigated); assertEquals(2, calls) }
         } finally { file.delete() }
     }
+
+    @Test fun rescanAfterSuccessfulNavigationNavigatesAgain() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val file = File(instrumentation.targetContext.cacheDir, "rescan-test-qr.png")
+        instrumentation.context.assets.open("scan/normal.png").use { input -> file.outputStream().use { input.copyTo(it) } }
+        val results = Results()
+        val enabled = mutableStateOf(true)
+        val navigated = mutableListOf<String>()
+        try {
+            ui.setContent {
+                CompositionLocalProvider(LocalActivityResultRegistryOwner provides results) {
+                    HydrosTheme { HydrosSnackbarProvider { Surface {
+                        ScanScreen(enabled = enabled.value, onResolve = { _, _ -> "resolved-device" }, onSelect = { navigated.add(it) })
+                    } } }
+                }
+            }
+            ui.onNodeWithText("从相册选择").performScrollTo().performClick()
+            ui.runOnIdle { results.pick(Uri.fromFile(file)) }
+            ui.waitUntil(5_000) { navigated.size == 1 }
+            ui.runOnIdle { assertEquals(listOf("resolved-device"), navigated) }
+
+            // Simulate navigation away and return (toggling enabled triggers session.pauseCamera())
+            ui.runOnIdle { enabled.value = false }
+            ui.runOnIdle { enabled.value = true }
+
+            ui.onNodeWithText("从相册选择").performScrollTo().performClick()
+            ui.runOnIdle { results.pick(Uri.fromFile(file)) }
+            ui.waitUntil(5_000) { navigated.size == 2 }
+            ui.runOnIdle { assertEquals(listOf("resolved-device", "resolved-device"), navigated) }
+        } finally { file.delete() }
+    }
 }

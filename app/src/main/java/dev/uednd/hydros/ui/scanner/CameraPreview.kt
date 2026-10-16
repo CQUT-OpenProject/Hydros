@@ -1,5 +1,7 @@
 package dev.uednd.hydros.ui.scanner
 
+import android.content.Context
+import android.graphics.Bitmap
 import android.util.Size
 import android.view.MotionEvent
 import androidx.camera.core.*
@@ -28,12 +30,24 @@ internal data class CameraStatus(
     val torchError: String? = null,
 )
 
+/** Pre-initializes CameraX hardware provider and ML Kit models in background to eliminate first-launch latency. */
+fun preloadScanner(context: Context) {
+    try {
+        ProcessCameraProvider.getInstance(context)
+        val dummy = InputImage.fromBitmap(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888), 0)
+        BarcodeScanning.getClient(qrOptions().build()).process(dummy)
+    } catch (_: Throwable) {
+        // Safe to ignore in test or headless environments.
+    }
+}
+
 @androidx.annotation.OptIn(markerClass = [ExperimentalGetImage::class])
 @Composable
 internal fun CameraPreview(
     enabled: Boolean,
     torchRequested: Boolean,
     modifier: Modifier = Modifier,
+    scanning: Boolean = true,
     onStatus: (CameraStatus) -> Unit,
     onCodes: (List<String>) -> Unit,
     onFailure: () -> Unit,
@@ -43,6 +57,7 @@ internal fun CameraPreview(
     val latestCodes by rememberUpdatedState(onCodes)
     val latestStatus by rememberUpdatedState(onStatus)
     val latestFailure by rememberUpdatedState(onFailure)
+    val latestScanning by rememberUpdatedState(scanning)
     val view = remember(context) { PreviewView(context).apply {
         implementationMode = PreviewView.ImplementationMode.PERFORMANCE
         scaleType = PreviewView.ScaleType.FILL_CENTER
@@ -72,10 +87,12 @@ internal fun CameraPreview(
             val executor = Executors.newSingleThreadExecutor()
             val main = ContextCompat.getMainExecutor(context)
             val future = ProcessCameraProvider.getInstance(context)
-            val preview = Preview.Builder().build().also { it.setSurfaceProvider(view.surfaceProvider) }
+            val resolutionSelector = ResolutionSelector.Builder().setResolutionStrategy(
+                ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
+            ).build()
+            val preview = Preview.Builder().setResolutionSelector(resolutionSelector).build().also { it.setSurfaceProvider(view.surfaceProvider) }
             val analysis = ImageAnalysis.Builder()
-                .setResolutionSelector(ResolutionSelector.Builder().setResolutionStrategy(
-                    ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)).build())
+                .setResolutionSelector(resolutionSelector)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
             val lock = Any()
             var disposed = false
@@ -107,7 +124,7 @@ internal fun CameraPreview(
                     val zoomMax = target.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
                     decoder = BarcodeScanning.getClient(qrOptions().setZoomSuggestionOptions(
                         ZoomSuggestionOptions.Builder { ratio ->
-                            if (disposed || !status.ready) false else {
+                            if (disposed || !status.ready || !latestScanning) false else {
                                 target.cameraControl.setZoomRatio(ratio.coerceIn(1f, zoomMax)); true
                             }
                         }.setMaxSupportedZoomRatio(zoomMax).build()).build())
@@ -119,20 +136,19 @@ internal fun CameraPreview(
                             hasFlash = target.cameraInfo.hasFlashUnit(),
                             error = if (value.error != null) "相机无法启动，请检查权限或设备相机" else null))
                     }.also { target.cameraInfo.cameraState.observe(owner, it) }
-                    view.post { if (!disposed) focus(view.width / 2f, view.height / 2f) }
                     analysis.setAnalyzer(executor) { image ->
                         synchronized(lock) {
                             val media = image.image
                             val scanner = decoder
-                            if (disposed || processing || media == null || scanner == null) image.close()
+                            if (disposed || !latestScanning || processing || media == null || scanner == null) image.close()
                             else {
                                 processing = true
                                 try {
                                     scanner.process(InputImage.fromMediaImage(media, image.imageInfo.rotationDegrees))
                                         .addOnSuccessListener { codes ->
-                                            if (!disposed) latestCodes(codes.mapNotNull { it.rawValue })
+                                            if (!disposed && latestScanning) latestCodes(codes.mapNotNull { it.rawValue })
                                         }
-                                        .addOnFailureListener { if (!disposed) latestFailure() }
+                                        .addOnFailureListener { if (!disposed && latestScanning) latestFailure() }
                                         .addOnCompleteListener {
                                             synchronized(lock) {
                                                 image.close()
@@ -142,7 +158,7 @@ internal fun CameraPreview(
                                         }
                                 } catch (_: Exception) {
                                     image.close(); processing = false
-                                    main.execute { if (!disposed) latestFailure() }
+                                    main.execute { if (!disposed && latestScanning) latestFailure() }
                                 }
                             }
                         }

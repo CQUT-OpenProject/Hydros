@@ -26,7 +26,7 @@ internal class ScanSession {
         else retry()
     }
     fun pauseCamera() {
-        if (mutable.value.phase == ScanPhase.SCANNING) retry()
+        if (mutable.value.phase in setOf(ScanPhase.SCANNING, ScanPhase.DONE)) retry()
     }
     fun pick() { mutable.value = ScanState(ScanPhase.PICKING, mutable.value.generation + 1) }
     fun picked(hasImage: Boolean): Long? {

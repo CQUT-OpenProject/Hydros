@@ -27,10 +27,15 @@ import dev.uednd.hydros.data.analytics.AnalyticsTracker
 import dev.uednd.hydros.data.analytics.FirebaseAnalyticsTracker
 import dev.uednd.hydros.data.analytics.NoOpAnalyticsTracker
 import com.google.firebase.analytics.FirebaseAnalytics
+import androidx.camera.camera2.Camera2Config
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.CameraXConfig
+import dev.uednd.hydros.ui.scanner.preloadScanner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 
 class HydrosDependencies(
@@ -50,17 +55,29 @@ class HydrosDependencies(
     fun sessionMonitor() = SessionMonitor(auth.credentials, sessions, orderPush())
 }
 
-open class HydrosApplication : Application() {
+open class HydrosApplication : Application(), CameraXConfig.Provider {
     lateinit var dependencies: HydrosDependencies
         internal set
     open val appUpdates: AppUpdateSource by lazy { GitHubAppUpdates() }
     open val appData: AppDataControl by lazy { AndroidAppDataControl(this) }
+
+    override fun getCameraXConfig(): CameraXConfig =
+        CameraXConfig.Builder.fromConfig(Camera2Config.defaultConfig())
+            .setAvailableCamerasLimiter(CameraSelector.DEFAULT_BACK_CAMERA)
+            .build()
 
     protected open fun buildDependencies(): HydrosDependencies = createDependencies(this)
 
     override fun onCreate() {
         super.onCreate()
         dependencies = buildDependencies()
+        warmUpScanner()
+    }
+
+    protected open fun warmUpScanner() {
+        dependencies.scope.launch(Dispatchers.Default) {
+            preloadScanner(this@HydrosApplication)
+        }
     }
 }
 

@@ -41,7 +41,9 @@ import dev.uednd.hydros.ui.components.LocalHydrosSnackbar
 import dev.uednd.hydros.ui.components.SnackbarMessage
 import dev.uednd.hydros.ui.components.SnackbarAction
 import dev.uednd.hydros.ui.components.ActionRow
+import dev.uednd.hydros.ui.components.PrimaryAction
 import dev.uednd.hydros.ui.components.SecondaryAction
+import dev.uednd.hydros.ui.components.TextAction
 import dev.uednd.hydros.ui.components.rememberHydrosHaptics
 import dev.uednd.hydros.R
 import dev.uednd.hydros.ui.scanner.*
@@ -63,6 +65,7 @@ fun ScanScreen(onResolve: suspend (String, Int?) -> String?, enabled: Boolean = 
     var active by remember { mutableStateOf(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var torch by remember { mutableStateOf(false) }
     var cameraStatus by remember { mutableStateOf(CameraStatus()) }
+    var cameraRetryKey by remember { mutableIntStateOf(0) }
     var photo by remember { mutableStateOf<Pair<Long, Uri>?>(null) }
     val permissionRequest = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         permission = it
@@ -102,11 +105,11 @@ fun ScanScreen(onResolve: suspend (String, Int?) -> String?, enabled: Boolean = 
             catch (_: Exception) { session.fail(token, "设备查询失败，请重新扫描") }
         }
     }
-    var navigated by remember { mutableStateOf(false) }
+    var navigatedGeneration by remember { mutableStateOf<Long?>(null) }
     val haptics = rememberHydrosHaptics()
-    LaunchedEffect(state.deviceId, active, enabled) {
-        if (enabled && active && state.phase == ScanPhase.DONE && !navigated) {
-            navigated = true
+    LaunchedEffect(state.deviceId, state.generation, active, enabled) {
+        if (enabled && active && state.phase == ScanPhase.DONE && navigatedGeneration != state.generation) {
+            navigatedGeneration = state.generation
             haptics.success()
             select(state.deviceId!!)
         }
@@ -126,20 +129,29 @@ fun ScanScreen(onResolve: suspend (String, Int?) -> String?, enabled: Boolean = 
             try { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
             catch (_: ActivityNotFoundException) { session.picked(false); snackbar.show("无法打开相册，请稍后重试", error = true) }
         },
-        onRetry = { photo = null; torch = false; cameraStatus = CameraStatus(); session.retryQuery() },
+        onRetry = {
+            photo = null
+            torch = false
+            if (cameraStatus.error != null) {
+                cameraStatus = CameraStatus()
+                cameraRetryKey++
+            }
+            session.retryQuery()
+        },
         onRescan = { session.retry() },
         queryProgress = queryProgress,
         onChoose = session::choose,
     ) { modifier ->
-        key(state.generation) {
-            val token = state.generation
+        key(cameraRetryKey) {
+            val currentGeneration by rememberUpdatedState(state.generation)
             CameraPreview(
-                enabled = enabled && active && permission && state.phase == ScanPhase.SCANNING,
+                enabled = enabled && permission,
+                scanning = active && state.phase == ScanPhase.SCANNING,
                 torchRequested = torch,
                 modifier = modifier,
                 onStatus = { cameraStatus = it; if (it.torchError != null) torch = it.torchOn },
-                onCodes = { session.codes(token, it) },
-                onFailure = { session.fail(token, "相机识别失败，请重新扫描") },
+                onCodes = { session.codes(currentGeneration, it) },
+                onFailure = { session.fail(currentGeneration, "相机识别失败，请重新扫描") },
             )
         }
     }
@@ -192,8 +204,8 @@ internal fun ScanContent(
                 }
                 if (!cameraGranted || cameraStatus.error != null) {
                     Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Button(onClick = if (!cameraGranted) onPermission else onRetry, modifier = Modifier.heightIn(min = 44.dp), shape = CircleShape) { Text(if (!cameraGranted) "允许相机" else "重试相机") }
-                        if (!cameraGranted && onSettings != null) TextButton(onClick = onSettings, modifier = Modifier.heightIn(min = 44.dp)) { Text("前往设置") }
+                        PrimaryAction(label = if (!cameraGranted) "允许相机" else "重试相机", onClick = if (!cameraGranted) onPermission else onRetry)
+                        if (!cameraGranted && onSettings != null) TextAction(label = "前往设置", onClick = onSettings)
                     }
                 }
             }
@@ -227,7 +239,7 @@ internal fun ScanContent(
             ScanPhase.RESOLVING, ScanPhase.DONE -> StateCard("正在查询设备", queryProgress ?: "识别成功，正在获取设备信息", loading = true)
             ScanPhase.ERROR -> {
                 SecondaryAction(if (state.mac != null) "重新查询" else "重新扫描", onClick = onRetry)
-                if (state.mac != null && onRescan != null) TextButton(onClick = onRescan) { Text("重新扫描") }
+                if (state.mac != null && onRescan != null) TextAction(label = "重新扫描", onClick = onRescan)
             }
             else -> Unit
         }
