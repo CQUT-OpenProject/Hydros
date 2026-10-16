@@ -11,6 +11,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
@@ -125,7 +127,9 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
             value = value.copy(stage=SessionStage.OPEN_UNCONFIRMED, message="开启结果待确认，请勿重复开启")
             save(value)
         } catch(e: Exception) {
-            if(current.value != null) save(value.copy(stage=SessionStage.OPEN_UNCONFIRMED, message="开启结果待确认，请核实设备状态"))
+            withContext(NonCancellable) {
+                if(current.value != null) save(value.copy(stage=SessionStage.OPEN_UNCONFIRMED, message="开启结果待确认，请核实设备状态"))
+            }
             throw e
         }
     }
@@ -201,7 +205,12 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
                 val closingOrOk = close.ok || close.errorCode == 307 || close.displayMessage?.contains("已在") == true
                 if (!closingOrOk) close.requireSuccess()
             }
-            catch(e: Exception) { save(value.copy(stage=SessionStage.CLOSE_UNCONFIRMED, message="关闭请求未确认，可重新核实")); throw e }
+            catch(e: Exception) {
+                withContext(NonCancellable) {
+                    save(value.copy(stage=SessionStage.CLOSE_UNCONFIRMED, message="关闭请求未确认，可重新核实"))
+                }
+                throw e
+            }
             val closed=withTimeoutOrNull(12_000) {
                 repeat(confirmationAttempts) {
                     when(val running=transport.running(auth, value.device)) {
