@@ -274,9 +274,11 @@ class HydrosFlowTest {
     @Test fun legalBodyMountsAfterEnterAndRemainsVisibleDuringPredictiveBack() {
         open(); click("我的"); click("关于 Hydros")
         for (document in listOf("服务协议", "隐私政策")) {
+            // Scrolling needs clock advancement; freeze only the navigation animation.
+            val row = ui.onNode(hasText(document) and hasClickAction()).performScrollTo()
             ui.mainClock.autoAdvance = false
             try {
-                ui.onNode(hasText(document) and hasClickAction()).performScrollTo().performClick()
+                row.performClick()
                 ui.mainClock.advanceTimeBy(64)
                 ui.onNode(hasText(document) and hasTestTag("page-title")).assertExists()
                 ui.onNodeWithText("Hydros $document").assertDoesNotExist()
@@ -333,11 +335,12 @@ class HydrosFlowTest {
             try {
                 repeat(2) { pass ->
                     listOf("服务协议", "隐私政策").forEach { document ->
+                        val row = ui.onNode(hasText(document) and hasClickAction()).performScrollTo()
                         frames.clear()
                         captureStart.set(System.nanoTime())
                         ui.mainClock.autoAdvance = false
                         try {
-                            ui.onNode(hasText(document) and hasClickAction()).performScrollTo().performClick()
+                            row.performClick()
                             repeat(45) {
                                 val start = android.os.SystemClock.uptimeMillis()
                                 ui.mainClock.advanceTimeBy(16)
