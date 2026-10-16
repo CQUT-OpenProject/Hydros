@@ -187,7 +187,7 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                 handledSession=sessionId; nav.navigate("session") { launchSingleTop=true }
             } else if(sessionId == null && handledSession != null && state.signedIn) {
                 handledSession=null
-                pageState.requestScrollToPage(1)
+                pageState.requestScrollToPage(0)
                 nav.navigate("home") { popUpTo("home"); launchSingleTop=true }
             }
         }
