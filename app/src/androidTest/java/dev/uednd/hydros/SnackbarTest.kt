@@ -24,6 +24,28 @@ import java.io.File
 class SnackbarTest {
     @get:Rule val ui = createComposeRule()
 
+    @Test fun resolvedAndRemovedMessagesClearOnlyTheirOwnNotice() {
+        val state = HydrosSnackbarState()
+        var message by mutableStateOf<String?>("设备离线")
+        var mounted by mutableStateOf(true)
+        ui.setContent { HydrosTheme { HydrosSnackbarProvider(state) {
+            if (mounted) SnackbarMessage(message)
+        } } }
+        ui.onNodeWithText("设备离线").assertExists()
+        ui.runOnIdle { message = null }
+        ui.onNodeWithText("设备离线").assertDoesNotExist()
+
+        ui.runOnIdle { message = "旧提示" }
+        ui.onNodeWithText("旧提示").assertExists()
+        ui.runOnIdle { state.show("其他操作失败"); message = null }
+        ui.onNodeWithText("其他操作失败").assertExists()
+
+        ui.runOnIdle { message = "页面提示" }
+        ui.onNodeWithText("页面提示").assertExists()
+        ui.runOnIdle { mounted = false }
+        ui.onNodeWithText("页面提示").assertDoesNotExist()
+    }
+
     @Test fun latestReplacesAndSameTextRestartsTimeout() {
         val state = HydrosSnackbarState()
         ui.setContent { HydrosTheme { HydrosSnackbarProvider(state) { Surface(Modifier.fillMaxSize()) {} } } }

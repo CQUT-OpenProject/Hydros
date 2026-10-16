@@ -153,7 +153,7 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                 else -> null
             }
             if(target != null) {
-                if (target == "home") pageState.scrollToPage(0)
+                if (target == "home") pageState.requestScrollToPage(0)
                 nav.navigate(target) { popUpTo(nav.graph.id) { inclusive=true }; launchSingleTop=true }
             }
         }
@@ -187,7 +187,7 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                 handledSession=sessionId; nav.navigate("session") { launchSingleTop=true }
             } else if(sessionId == null && handledSession != null && state.signedIn) {
                 handledSession=null
-                pageState.scrollToPage(1)
+                pageState.requestScrollToPage(1)
                 nav.navigate("home") { popUpTo("home"); launchSingleTop=true }
             }
         }
@@ -211,10 +211,13 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
         if (route == destination || !state.signedIn || state.reauthentication != null) return
         val page = destinations.take(2).indexOfFirst { it.route == destination }
         if (page >= 0) {
-            navigationScope.launch {
-                if (state.feedback.reduceMotionEnabled || navigationRoute != "home") pageState.scrollToPage(page)
+            if (navigationRoute != "home") {
+                // A restored secondary route may not have laid out the pager yet.
+                pageState.requestScrollToPage(page)
+                nav.navigate("home") { popUpTo("home"); launchSingleTop = true }
+            } else navigationScope.launch {
+                if (state.feedback.reduceMotionEnabled) pageState.scrollToPage(page)
                 else pageState.animateScrollToPage(page)
-                if (navigationRoute != "home") nav.navigate("home") { popUpTo("home"); launchSingleTop = true }
             }
             return
         }
@@ -429,9 +432,11 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                             }
                         }
                         composable("bill/{id}") { backStack ->
-                            LaunchedEffect(backStack.id) { backStack.arguments?.getString("id")?.let(model::loadDetail) }
+                            val billId = backStack.arguments?.getString("id")
+                            LaunchedEffect(backStack.id) { billId?.let(model::loadDetail) }
                             HydrosPage("账单详情", onBack = { back() }) {
-                                BillDetailScreen(state.bills.find { it.id == backStack.arguments?.getString("id") }, onWallet = { if (state.reauthentication == null) nav.popBackStack("home", inclusive = false) })
+                                val currentBill = state.bills.find { it.id == billId } ?: remember(billId) { state.bills.find { it.id == billId } }
+                                BillDetailScreen(currentBill, onWallet = { if (state.reauthentication == null) nav.popBackStack("home", inclusive = false) })
                             }
                         }
                         composable("account/{form}") { backStack ->

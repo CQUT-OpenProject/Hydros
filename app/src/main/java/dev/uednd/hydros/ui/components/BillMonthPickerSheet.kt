@@ -44,9 +44,8 @@ internal fun BillMonthPickerSheet(
     var draft by remember(month) { mutableStateOf(month) }
     val currentMonth = remember { YearMonth.now() }
     val colors = MaterialTheme.colorScheme
-    val haptics = rememberHydrosHaptics()
-
     HydrosBottomSheetContainer(onDismiss = onDismiss, sheetGesturesEnabled = false) {
+        val haptics = rememberHydrosHaptics()
         Text(
             "选择月份",
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 22.dp)
@@ -63,7 +62,7 @@ internal fun BillMonthPickerSheet(
             Text("月份", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
                 color = colors.onSurfaceVariant, textAlign = TextAlign.Center)
         }
-        MonthWheelPair(month = draft, currentMonth = currentMonth, onMonthChange = { draft = it })
+        MonthWheelPair(month = draft, currentMonth = currentMonth, haptics = haptics, onMonthChange = { draft = it })
         HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.4f))
         Row(
             Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 12.dp),
@@ -81,16 +80,23 @@ internal fun BillMonthPickerSheet(
 }
 
 @Composable
-private fun MonthWheelPair(month: YearMonth, currentMonth: YearMonth, onMonthChange: (YearMonth) -> Unit) {
+internal fun MonthWheelPair(
+    month: YearMonth,
+    currentMonth: YearMonth,
+    modifier: Modifier = Modifier,
+    haptics: HydrosHaptics = rememberHydrosHaptics(),
+    onMonthChange: (YearMonth) -> Unit
+) {
     val colors = MaterialTheme.colorScheme
     val maxMonth = if (month.year == currentMonth.year) currentMonth.monthValue else 12
-    Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp).height(MONTH_WHEEL_HEIGHT)) {
+    Box(modifier.fillMaxWidth().padding(horizontal = 20.dp).height(MONTH_WHEEL_HEIGHT)) {
         Row(Modifier.fillMaxSize()) {
             MonthWheelColumn(
                 values = (FIRST_BILL_YEAR..currentMonth.year).toList(),
                 selectedIndex = month.year - FIRST_BILL_YEAR,
                 label = "年份",
                 modifier = Modifier.weight(1f),
+                haptics = haptics,
                 onSelected = { index ->
                     val year = index + FIRST_BILL_YEAR
                     val yearMaxMonth = if (year == currentMonth.year) currentMonth.monthValue else 12
@@ -102,6 +108,7 @@ private fun MonthWheelPair(month: YearMonth, currentMonth: YearMonth, onMonthCha
                 selectedIndex = month.monthValue - 1,
                 label = "月份",
                 modifier = Modifier.weight(1f),
+                haptics = haptics,
                 onSelected = { onMonthChange(YearMonth.of(month.year, it + 1)) }
             ) { "${it}月" }
         }
@@ -121,11 +128,12 @@ private fun MonthWheelPair(month: YearMonth, currentMonth: YearMonth, onMonthCha
 }
 
 @Composable
-private fun MonthWheelColumn(
+internal fun MonthWheelColumn(
     values: List<Int>,
     selectedIndex: Int,
     label: String,
     modifier: Modifier = Modifier,
+    haptics: HydrosHaptics = rememberHydrosHaptics(),
     onSelected: (Int) -> Unit,
     valueLabel: (Int) -> String
 ) {
@@ -133,17 +141,25 @@ private fun MonthWheelColumn(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = centeredIndex)
     val scope = rememberCoroutineScope()
     val latestOnSelected by rememberUpdatedState(onSelected)
+    val latestHaptics by rememberUpdatedState(haptics)
     val flingBehavior = rememberSnapFlingBehavior(listState, SnapPosition.Center)
 
     LaunchedEffect(values.size) {
         if (listState.firstVisibleItemIndex != centeredIndex) listState.scrollToItem(centeredIndex)
     }
     LaunchedEffect(listState, values.size) {
+        var lastIndex: Int? = null
         snapshotFlow {
             val layout = listState.layoutInfo
             val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
             layout.visibleItemsInfo.minByOrNull { item -> kotlin.math.abs(item.offset + item.size / 2 - center) }?.index
-        }.filterNotNull().distinctUntilChanged().collect { latestOnSelected(it) }
+        }.filterNotNull().distinctUntilChanged().collect { index ->
+            if (lastIndex != null && lastIndex != index) {
+                latestHaptics.light()
+            }
+            lastIndex = index
+            latestOnSelected(index)
+        }
     }
 
     LazyColumn(

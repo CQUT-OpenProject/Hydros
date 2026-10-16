@@ -6,7 +6,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.heading
@@ -15,7 +14,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.uednd.hydros.R
 
 /** Base bottom sheet container managing insets, rounded chrome, and dismissing. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -89,60 +87,6 @@ fun HydrosBottomSheet(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             content = actions
         )
-    }
-}
-
-/** Scrollable rich text / custom content bottom sheet with a header and close button. */
-@Composable
-fun ContentBottomSheet(
-    title: String,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
-    dismissEnabled: Boolean = true,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    HydrosBottomSheetContainer(
-        onDismiss = onDismiss,
-        modifier = modifier,
-        dismissEnabled = dismissEnabled
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 32.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                HydrosIconButton(
-                    onClick = onDismiss,
-                    size = IconBtnSize.SM,
-                    description = "关闭"
-                ) {
-                    Glyph(R.drawable.ic_close, modifier = Modifier.size(16.dp))
-                }
-            }
-            SubtleDivider()
-            Spacer(Modifier.height(12.dp))
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f, fill = false)
-                    .verticalScroll(rememberScrollState()),
-                content = content
-            )
-        }
     }
 }
 

@@ -38,13 +38,11 @@ fun IconTile(
     res: Int,
     modifier: Modifier = Modifier,
     tone: IconTone = IconTone.NEUTRAL,
-    tertiary: Boolean = false,
     size: Dp = 36.dp,
     iconSize: Dp = 18.dp
 ) {
-    val effectiveTone = if (tertiary) IconTone.TERTIARY else tone
     val colors = MaterialTheme.colorScheme
-    val (bgColor, fgColor) = when (effectiveTone) {
+    val (bgColor, fgColor) = when (tone) {
         IconTone.PRIMARY -> colors.primaryContainer.copy(alpha = 0.75f) to colors.primary
         IconTone.SECONDARY -> colors.secondaryContainer.copy(alpha = 0.75f) to colors.onSecondaryContainer
         IconTone.TERTIARY -> colors.tertiaryContainer.copy(alpha = 0.75f) to colors.onTertiaryContainer

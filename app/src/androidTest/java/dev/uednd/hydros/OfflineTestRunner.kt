@@ -72,6 +72,7 @@ class OfflineTestApplication : HydrosApplication() {
         }
         val ble = object : BlePort {
             override val ready = false
+            override val connectedMac: String? = null
             override suspend fun connect(mac: String) = BleConnectResult.NoService
             override suspend fun query(): DeviceQueryState? = null
             override suspend fun writeRate(bytes: ByteArray) = false

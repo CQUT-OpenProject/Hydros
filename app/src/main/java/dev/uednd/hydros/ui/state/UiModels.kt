@@ -35,9 +35,9 @@ fun DeviceUi.displayName(remarks: Map<String, String>): String = remarks[id]?.ta
 
 @Serializable data class SessionUi(val device: DeviceUi, val ownerKey: String, val startedAt: Long = System.currentTimeMillis(),
     val stage: SessionStage = SessionStage.OPENING, val orderNo: String = "", val consumeDate: String = "",
-    val protocolType: String = "", val randomNumber: String = "", val uploaded: Boolean = false,
-    val rateAttempted: Boolean = false, val uploadAttempted: Boolean = false, val xfDataHex: String? = null,
-    val writeBackHex: String? = null, val amountMilli: Long? = null, val failureReportPending: Boolean = false,
+    val uploaded: Boolean = false, val rateAttempted: Boolean = false, val uploadAttempted: Boolean = false,
+    val writeBackHex: String? = null, val failureReportPending: Boolean = false,
+    val deviceUseChanged: Boolean = false,
     val message: String? = null, val endedAt: Long? = null)
 enum class BillType(val requestType: String, val label: String) {
     CONSUMPTION("2", "消费记录"), RECHARGE("1", "充值记录")

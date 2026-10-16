@@ -78,13 +78,14 @@ class HydrosFlowTest {
         var rates = 0
         val ble = object : BlePort {
             override var ready = false
-            override suspend fun connect(mac: String): BleConnectResult { ready = true; return BleConnectResult.Ready }
+            override var connectedMac: String? = null
+            override suspend fun connect(mac: String): BleConnectResult { connectedMac = mac; ready = true; return BleConnectResult.Ready }
             override suspend fun query() = DeviceQueryState("20", "ABCDEF01", 0, 1, 2)
             override suspend fun writeRate(bytes: ByteArray): Boolean { rates++; return true }
             override suspend fun closeValve() = false
             override suspend fun collect(): ByteArray? = null
             override suspend fun writeBack(bytes: ByteArray) = false
-            override fun disconnect() { ready = false }
+            override fun disconnect() { ready = false; connectedMac = null }
         }
         open(ble = ble)
         val rejection = CompletableDeferred<ApiResponse<JsonElement>>()
@@ -414,8 +415,10 @@ class HydrosFlowTest {
         }
         ui.onNodeWithText("感谢这些开源项目").assertDoesNotExist()
         screenshot("third-party-licenses")
-        val library = ui.onAllNodes(hasClickAction()).filter(!hasContentDescription("返回")).onFirst()
-        library.performClick()
+        click("Google Material Symbols")
+        ui.onNodeWithText("查看项目").assertExists()
+        click("关闭")
+        ui.onNodeWithText("androidx.activity:activity", substring = false).performScrollTo().performClick()
         ui.onNodeWithText("查看许可原文").assertExists()
         click("关闭")
         ui.onNodeWithContentDescription("返回").performClick()
@@ -626,6 +629,7 @@ class HydrosFlowTest {
     }
     private class UiBle : BlePort {
         override val ready=false
+        override val connectedMac: String?=null
         override suspend fun connect(mac: String)=BleConnectResult.NoService
         override suspend fun query(): DeviceQueryState?=null
         override suspend fun writeRate(bytes: ByteArray)=false

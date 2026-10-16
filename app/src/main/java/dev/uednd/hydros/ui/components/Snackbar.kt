@@ -134,5 +134,8 @@ private fun HydrosSnackbarHost(bottomPadding: Dp = 0.dp, modalOwner: Any? = null
 @Composable
 internal fun SnackbarMessage(message: String?, eventKey: Any? = message, action: SnackbarAction? = null, error: Boolean = true) {
     val snackbar = LocalHydrosSnackbar.current
-    LaunchedEffect(message, eventKey) { message?.let { snackbar.show(it, action, error) } }
+    DisposableEffect(snackbar, message, eventKey) {
+        val ticket = message?.let { snackbar.show(it, action, error) }
+        onDispose { ticket?.let { snackbar.dismiss(it.id) } }
+    }
 }

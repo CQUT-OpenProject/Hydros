@@ -56,6 +56,7 @@ class RotationTest {
             }
             val ble=object : BlePort {
                 override val ready=false
+                override val connectedMac: String?=null
                 override suspend fun connect(mac: String)=BleConnectResult.NoService
                 override suspend fun query(): DeviceQueryState?=null
                 override suspend fun writeRate(bytes: ByteArray)=false
@@ -78,7 +79,9 @@ class RotationTest {
         ui.activityRule.scenario.recreate()
         ui.waitUntil(8_000) { ui.onAllNodesWithText("开启待确认").fetchSemanticsNodes().isNotEmpty() }
         ui.onNodeWithText("返回首页").performScrollTo().performClick()
-        ui.onNodeWithText("钱包",substring=false).performClick()
+        ui.waitUntil(8_000) { ui.onAllNodesWithText("钱包", substring = false).fetchSemanticsNodes().isNotEmpty() }
+        ui.onNodeWithText("钱包", substring = false).performClick()
+        ui.waitUntil(8_000) { ui.onAllNodesWithText("账单记录").fetchSemanticsNodes().isNotEmpty() }
         ui.activityRule.scenario.recreate()
         ui.waitUntil(8_000) { ui.onAllNodesWithText("账单记录").fetchSemanticsNodes().isNotEmpty() }
     }

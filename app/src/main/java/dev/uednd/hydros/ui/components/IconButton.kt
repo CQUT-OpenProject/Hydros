@@ -14,7 +14,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
@@ -25,18 +24,17 @@ import androidx.compose.ui.unit.dp
 
 enum class IconBtnVariant {
     STANDARD,
-    TONAL,
-    DANGER
+    TONAL
 }
 
-enum class IconBtnSize(val size: Dp, val iconSize: Dp) {
-    MD(44.dp, 24.dp),
-    SM(32.dp, 16.dp)
+enum class IconBtnSize(val size: Dp) {
+    MD(44.dp),
+    SM(32.dp)
 }
 
 /**
  * Standard icon button:
- * 44dp (md) / 32dp (sm), circular shape, standard/tonal/danger semantic color variants.
+ * 44dp (md) / 32dp (sm), circular shape, standard and tonal color variants.
  */
 @Composable
 fun HydrosIconButton(
@@ -53,13 +51,8 @@ fun HydrosIconButton(
     val baseContentColor = when (variant) {
         IconBtnVariant.STANDARD -> colors.onSurface
         IconBtnVariant.TONAL -> colors.onSurfaceVariant
-        IconBtnVariant.DANGER -> colors.error
     }
     val contentColor = if (enabled) baseContentColor else baseContentColor.copy(alpha = 0.4f)
-    val rippleColor = when (variant) {
-        IconBtnVariant.DANGER -> colors.error
-        else -> colors.onSurface
-    }
 
     Box(
         modifier = modifier
@@ -67,7 +60,7 @@ fun HydrosIconButton(
             .clip(CircleShape)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
-                indication = ripple(color = rippleColor),
+                indication = ripple(color = colors.onSurface),
                 enabled = enabled,
                 role = Role.Button,
                 onClick = { haptics.light(); onClick() }

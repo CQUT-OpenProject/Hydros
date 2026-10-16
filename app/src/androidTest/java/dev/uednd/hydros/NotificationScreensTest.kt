@@ -50,7 +50,8 @@ class NotificationScreensTest {
         ui.onNodeWithText("重试").performClick()
         assertEquals(1, retries)
         ui.onNodeWithText("钱包网络错误").assertDoesNotExist()
-        ui.onNodeWithText("重新加载钱包").assertExists()
+        ui.onNodeWithText("刷新", substring = false).performClick()
+        assertEquals(2, retries)
         ui.runOnIdle { state = state.copy(walletError = null) }
         ui.runOnIdle { state = state.copy(walletError = "钱包网络错误") }
         ui.onNodeWithText("钱包网络错误").assertIsDisplayed()
