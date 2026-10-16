@@ -167,8 +167,8 @@ fun AccountFormScreen(form: AccountForm, account: AccountUi, onSend: suspend (St
             else scope.launch {
                 busy=true
                 try {
-                    val saveOld = if (sms) "" else oldPassword
-                    val saveCode = if (sms) code else ""
+                    val saveOld = if (form == AccountForm.PASSWORD && !sms) oldPassword else ""
+                    val saveCode = if (form == AccountForm.PHONE || sms) code else ""
                     if(onSave(targetPhone, saveOld, password, saveCode)) {
                         oldPassword=""; password=""; repeated=""; code=""; snackbar.show("修改完成")
                     }

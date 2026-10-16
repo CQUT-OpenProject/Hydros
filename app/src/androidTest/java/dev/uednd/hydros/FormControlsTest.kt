@@ -14,6 +14,7 @@ import dev.uednd.hydros.ui.screens.MineScreen
 import dev.uednd.hydros.ui.state.AccountUi
 import dev.uednd.hydros.ui.state.HydrosUiState
 import dev.uednd.hydros.ui.theme.HydrosTheme
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
@@ -104,6 +105,35 @@ class FormControlsTest {
         phoneCode.performTextInput("1234567")
         phoneCode.assertTextEquals("1234567")
         ui.onNodeWithText("7/6").assertDoesNotExist()
+    }
+
+    @Test fun changePhoneFormSubmitsEnteredSmsCode() {
+        val testAccount = AccountUi(phone = "13800138000")
+        var submittedPhone = ""
+        var submittedCode = ""
+        ui.setContent {
+            HydrosTheme {
+                Surface {
+                    AccountFormScreen(
+                        form = AccountForm.PHONE,
+                        account = testAccount,
+                        onSend = { _, _ -> true },
+                        onSave = { phone, _, _, code ->
+                            submittedPhone = phone
+                            submittedCode = code
+                            true
+                        }
+                    )
+                }
+            }
+        }
+        ui.onNodeWithContentDescription("新手机号").performTextInput("13900139000")
+        ui.onNodeWithContentDescription("验证码").performTextInput("654321")
+        ui.onNodeWithText("保存修改").performClick()
+        ui.runOnIdle {
+            assertEquals("13900139000", submittedPhone)
+            assertEquals("654321", submittedCode)
+        }
     }
 
     @Test fun changePasswordFormSwitchesTabsAndDoesNotLimitInput() {
