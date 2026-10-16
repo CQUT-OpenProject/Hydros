@@ -13,3 +13,9 @@
 /.dev/
 
 ref/
+
+# Signing material must never enter the repository.
+*.jks
+*.keystore
+/release-apks/
+__pycache__/

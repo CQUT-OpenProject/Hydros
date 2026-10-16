@@ -10,6 +10,29 @@ plugins {
     alias(libs.plugins.google.services)
 }
 
+val hydrosVersion = providers.gradleProperty("hydrosVersion").get()
+val versionParts = Regex("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")
+    .matchEntire(hydrosVersion)?.groupValues?.drop(1)?.map { it.toLongOrNull() }
+    ?: error("hydrosVersion must be a stable version X.Y.Z")
+require(versionParts.all { it != null && it <= 2100 }) { "hydrosVersion is outside the Android versionCode range" }
+val (versionMajor, versionMinor, versionPatch) = versionParts.map { requireNotNull(it) }
+require(versionMinor < 1000 && versionPatch < 1000) { "Minor and patch versions must be below 1000" }
+val hydrosVersionCode = versionMajor * 1_000_000 + versionMinor * 1_000 + versionPatch
+require(hydrosVersionCode in 1..2_100_000_000L) { "hydrosVersion is outside the Android versionCode range" }
+
+val releaseSigning = listOf("ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")
+    .associateWith { providers.environmentVariable(it).orNull }
+val hasReleaseSigning = releaseSigning.values.any { !it.isNullOrBlank() }
+require(!hasReleaseSigning || releaseSigning.values.all { !it.isNullOrBlank() }) {
+    "Release signing requires ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD"
+}
+gradle.taskGraph.whenReady {
+    val packagesRelease = allTasks.any {
+        it.project == project && it.name in setOf("assembleRelease", "bundleRelease", "packageRelease", "packageReleaseBundle", "signReleaseBundle")
+    }
+    require(!packagesRelease || hasReleaseSigning) { "Release artifacts require the official signing key" }
+}
+
 abstract class GenerateProjectLicense : DefaultTask() {
     @get:InputFile
     abstract val licenseFile: RegularFileProperty
@@ -38,8 +61,8 @@ android {
         applicationId = "dev.uednd.hydros"
         minSdk = 31
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = hydrosVersionCode.toInt()
+        versionName = hydrosVersion
         val buildTime = providers.environmentVariable("SOURCE_DATE_EPOCH").orNull?.toLongOrNull()
             ?.let(Instant::ofEpochSecond) ?: Instant.now()
         buildConfigField("String", "BUILD_TIME", "\"$buildTime\"")
@@ -49,8 +72,21 @@ android {
         testInstrumentationRunner = "dev.uednd.hydros.OfflineTestRunner"
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(requireNotNull(releaseSigning["ANDROID_KEYSTORE_PATH"]))
+                storePassword = releaseSigning["ANDROID_KEYSTORE_PASSWORD"]
+                keyAlias = releaseSigning["ANDROID_KEY_ALIAS"]
+                keyPassword = releaseSigning["ANDROID_KEY_PASSWORD"]
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
+            ndk.abiFilters += "arm64-v8a"
             // AGP 9.3+ enables R8, optimized resource shrinking and Android keep rules together.
             optimization {
                 enable = true
@@ -61,16 +97,6 @@ android {
     androidResources {
         // The app uses Chinese; retain English as the fallback for library UI.
         localeFilters += listOf("zh", "en")
-    }
-
-    splits {
-        abi {
-            // AGP cannot build a resource-shrunk AAB with ABI APK splits enabled.
-            isEnable = providers.gradleProperty("splitApks").map(String::toBoolean).getOrElse(false)
-            reset()
-            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-            isUniversalApk = true
-        }
     }
 
     buildFeatures {

@@ -1,0 +1,193 @@
+name: Release CI
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Stable release tag (vX.Y.Z); retries must use the same tag
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Validate tagged source
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+      version: ${{ steps.source.outputs.version }}
+      commit: ${{ steps.source.outputs.commit }}
+      epoch: ${{ steps.source.outputs.epoch }}
+    steps:
+      - name: Validate tag format
+        id: tag
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo 'Expected vX.Y.Z'; exit 1; }
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Checkout tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify tag, version and master ancestry
+        id: source
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: python3 scripts/release.py source --tag "$TAG"
+
+  quality:
+    name: Release quality verification
+    needs: version
+    uses: ./.github/workflows/quality.yml
+    with:
+      ref: ${{ needs.version.outputs.commit }}
+      run_ui_tests: true
+
+  android:
+    name: Build signed arm64-v8a APK
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    outputs:
+      certificate: ${{ steps.signing.outputs.certificate }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      COMMIT: ${{ needs.version.outputs.commit }}
+      SOURCE_DATE_EPOCH: ${{ needs.version.outputs.epoch }}
+    steps:
+      - name: Checkout fixed release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.commit }}
+          persist-credentials: false
+      - name: Setup Java 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
+        with:
+          cache-read-only: true
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - name: Install Android SDK packages
+        run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
+      - name: Configure release signing
+        id: signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/hydros-release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$ANDROID_KEYSTORE_PATH" >> "$GITHUB_ENV"
+          for variable in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            [[ -n "${!variable}" ]] || { echo "Missing repository secret: $variable"; exit 1; }
+          done
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          keytool -exportcert -keystore "$ANDROID_KEYSTORE_PATH" -alias "$ANDROID_KEY_ALIAS" -storepass:env ANDROID_KEYSTORE_PASSWORD -file "$RUNNER_TEMP/hydros-signing.der"
+          certificate="$(sha256sum "$RUNNER_TEMP/hydros-signing.der" | cut -d ' ' -f 1)"
+          echo "certificate=$certificate" >> "$GITHUB_OUTPUT"
+      - name: Configure and validate Firebase
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          set -euo pipefail
+          [[ -n "$GOOGLE_SERVICES_JSON_BASE64" ]] || { echo 'Missing repository secret: GOOGLE_SERVICES_JSON_BASE64'; exit 1; }
+          printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > app/google-services.json
+          python3 scripts/release.py firebase app/google-services.json
+      - name: Reuse verified published APK on retry
+        id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CERTIFICATE: ${{ steps.signing.outputs.certificate }}
+          REPOSITORY: ${{ github.repository }}
+        run: python3 scripts/release.py reuse --version "$VERSION" --commit "$COMMIT" --certificate "$CERTIFICATE" --repository "$REPOSITORY"
+      - name: Build and inspect release APK
+        if: steps.reuse.outputs.reused != 'true'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          CERTIFICATE: ${{ steps.signing.outputs.certificate }}
+        run: |
+          ./gradlew --no-daemon :app:lintRelease :app:assembleRelease
+          python3 scripts/release.py stage --apk app/build/outputs/apk/release/app-release.apk --version "$VERSION" --commit "$COMMIT" --certificate "$CERTIFICATE"
+      - name: Upload APK and release record
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-release
+          path: release-apks/*
+          retention-days: 7
+          if-no-files-found: error
+      - name: Upload R8 mapping
+        if: steps.reuse.outputs.reused != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-r8-mapping
+          path: app/build/outputs/mapping/release/mapping.txt
+          retention-days: 90
+          if-no-files-found: error
+      - name: Upload release Lint reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-lint-reports
+          path: app/build/reports/lint-results-release.*
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: Remove temporary signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/hydros-release.jks" "$RUNNER_TEMP/hydros-signing.der"
+
+  publish:
+    name: Publish complete GitHub release
+    needs: [version, quality, android]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.commit }}
+          persist-credentials: false
+      - name: Setup Java 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - name: Install APK inspection tools
+        run: sdkmanager 'build-tools;36.0.0'
+      - name: Download verified APK
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: android-release
+          path: release-apks
+      - name: Stage, verify and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ needs.version.outputs.version }}
+          COMMIT: ${{ needs.version.outputs.commit }}
+          CERTIFICATE: ${{ needs.android.outputs.certificate }}
+        run: python3 scripts/release.py publish --repository "$REPOSITORY" --version "$VERSION" --commit "$COMMIT" --certificate "$CERTIFICATE"
