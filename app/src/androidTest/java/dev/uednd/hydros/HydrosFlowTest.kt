@@ -390,7 +390,7 @@ class HydrosFlowTest {
     }
     @Test fun aboutShowsBuildMetadataLicensesAndLegalDocuments() {
         open(); click("我的")
-        ui.onNodeWithText("v0.1.0").assertDoesNotExist()
+        ui.onNodeWithText("v${BuildConfig.VERSION_NAME}").assertDoesNotExist()
         ui.onNodeWithText("有新版本！").assertDoesNotExist()
         click("关于 Hydros"); waitFor("构建时间")
         screenshot("about-light")
@@ -456,9 +456,10 @@ class HydrosFlowTest {
     }
     @Test fun updateBadgeRequiresNewerReleaseAndSurvivesFailedRefresh() {
         var failRefresh = false
+        val nextVersion = "${BuildConfig.VERSION_NAME.substringBefore('.').toInt() + 1}.0.0"
         open(updateSource = dev.uednd.hydros.data.update.AppUpdateSource {
             if (failRefresh) throw java.io.IOException("offline")
-            dev.uednd.hydros.data.update.AppRelease("0.2.0", "v0.2.0", "测试更新说明")
+            dev.uednd.hydros.data.update.AppRelease(nextVersion, "v$nextVersion", "测试更新说明")
         })
         click("我的"); ui.onNodeWithText("有新版本！").assertExists()
         click("关于 Hydros"); ui.onNodeWithText("有新版本！").assertExists()
@@ -570,7 +571,7 @@ class HydrosFlowTest {
         open(); click("我的")
         screenshot("mine-single-line")
         listOf("验证码发送至新号码", "使用当前密码验证", "使用当前手机号验证码验证",
-            "主题色彩与深浅模式", "0.1.0 · 校园生活客户端").forEach {
+            "主题色彩与深浅模式", "${BuildConfig.VERSION_NAME} · 校园生活客户端").forEach {
             ui.onNodeWithText(it).assertDoesNotExist()
         }
         click("应用外观")
