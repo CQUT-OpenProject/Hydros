@@ -201,11 +201,11 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
             if (state.feedback.reduceMotionEnabled) pageState.scrollToPage(0) else pageState.animateScrollToPage(0)
         }
     }
-    // Follow the actual navigation entry, rather than outgoing animated compositions.
-    // A completed connection remains ready across Activity recreation.
-    LaunchedEffect(entry?.id) {
-        if (route == "device/{id}") state.devices.find { it.id == entry?.arguments?.getString("id") }?.let(::requestConnect)
-        else model.cancelConnection()
+    val targetDeviceId = if (route == "device/{id}") entry?.arguments?.getString("id") else null
+    val targetDevice = targetDeviceId?.let { id -> state.devices.find { it.id == id } }
+    LaunchedEffect(entry?.id, targetDevice != null) {
+        if (targetDevice != null) requestConnect(targetDevice)
+        else if (route != "device/{id}") model.cancelConnection()
     }
     fun main(destination: String) {
         if (route == destination || !state.signedIn || state.reauthentication != null) return
@@ -499,7 +499,7 @@ private fun HydrosBottomBar(route: String, onNavigate: (String) -> Unit, onScan:
     val haptics = rememberHydrosHaptics()
     val windowHeight = LocalConfiguration.current.screenHeightDp
     val density = LocalDensity.current
-    // Chronos --spacing-tabbar; navigationBarsPadding adds the separate system safe area.
+    // Base tab bar spacing; navigationBarsPadding adds the separate system safe area.
     val baseHeight = when { windowHeight <= 560 -> 50.dp; windowHeight <= 720 -> 58.dp; else -> 68.dp }
     val barHeight = with(density) {
         maxOf(baseHeight, MaterialTheme.typography.labelLarge.lineHeight.toDp() + 29.dp)

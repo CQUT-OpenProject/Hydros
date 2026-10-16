@@ -26,14 +26,17 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
     val snackbar = LocalHydrosSnackbar.current
     val restriction = when {
         device == null -> "设备不存在，请重新扫描设备二维码"
-        state.session != null -> when (state.session.stage) {
-            SessionStage.USING -> "已有设备正在使用，请先结束当前设备"
-            SessionStage.OPENING -> "当前设备正在开启，请等待结果"
-            SessionStage.OPEN_UNCONFIRMED -> "原设备开启结果待确认，请先返回核实"
-            SessionStage.STOPPING -> "原设备正在关闭，请等待结果"
-            SessionStage.CLOSE_UNCONFIRMED -> "原设备关闭结果待确认，请先返回核实"
-            SessionStage.SETTLING, SessionStage.SETTLEMENT_PENDING -> "原设备结算尚未完成，请先返回处理"
-            SessionStage.WRITEBACK_PENDING -> "原设备消费记录待清除，请先返回处理"
+        state.session != null -> {
+            val otherDevice = state.session.device.id != device.id
+            if (otherDevice) when (state.session.stage) {
+                SessionStage.USING -> "已有设备正在使用，请先结束当前设备"
+                SessionStage.OPENING -> "当前设备正在开启，请等待结果"
+                SessionStage.STOPPING -> "原设备正在关闭，请等待结果"
+                SessionStage.OPEN_UNCONFIRMED -> "原设备开启结果待确认，请先返回核实"
+                SessionStage.CLOSE_UNCONFIRMED -> "原设备关闭结果待确认，请先返回核实"
+                SessionStage.SETTLING, SessionStage.SETTLEMENT_PENDING -> "原设备结算尚未完成，请先返回处理"
+                SessionStage.WRITEBACK_PENDING -> "原设备消费记录待清除，请先返回处理"
+            } else null
         }
         device.status == DeviceStatus.BUSY && state.connectionStage == ConnectionStage.READY -> null
         device.status == DeviceStatus.OFFLINE && state.connectionStage !in listOf(ConnectionStage.CONNECTING, ConnectionStage.FAILED) -> "设备暂时离线，请稍后重试或选择其他设备"
@@ -46,11 +49,14 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
             Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconTile(device.category.icon, tone = IconTone.PRIMARY)
                 Column(Modifier.weight(1f)) { Text(device.displayName(state.deviceRemarks), style = MaterialTheme.typography.headlineSmall); Text(device.category.label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                if (favorite) TextButton(onClick = {
-                    remark = state.deviceRemarks[device.id].orEmpty()
-                    remarkError = null
-                    editingRemark = true
-                }) { Text(if (device.id in state.deviceRemarks) "修改备注" else "设置备注") }
+                if (favorite) TextAction(
+                    label = if (device.id in state.deviceRemarks) "修改备注" else "设置备注",
+                    onClick = {
+                        remark = state.deviceRemarks[device.id].orEmpty()
+                        remarkError = null
+                        editingRemark = true
+                    }
+                )
             }
             if (device.id in state.connectedDeviceIds) {
                 SecondaryAction(
@@ -105,23 +111,27 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
                 Text("留空保存可恢复原始设备名", style = MaterialTheme.typography.bodySmall)
             }
         },
-        dismissButton = { TextButton(onClick = { editingRemark = false }, enabled = !savingRemark) { Text("取消") } },
+        dismissButton = { TextAction("取消", enabled = !savingRemark, onClick = { editingRemark = false }) },
         confirmButton = {
-            TextButton(enabled = !savingRemark && !state.working, onClick = {
-                scope.launch {
-                    savingRemark = true
-                    try {
-                        val before = snackbar.notice.value?.id
-                        if (onSaveRemark(device.id, remark)) {
-                            editingRemark = false
-                            snackbar.show("备注已保存")
-                        } else {
-                            remarkError = "保存失败，请重试"
-                            if (snackbar.notice.value?.id == before) snackbar.show(remarkError!!, error = true)
-                        }
-                    } finally { savingRemark = false }
+            TextAction(
+                label = if (savingRemark) "保存中" else "保存",
+                enabled = !savingRemark && !state.working,
+                onClick = {
+                    scope.launch {
+                        savingRemark = true
+                        try {
+                            val before = snackbar.notice.value?.id
+                            if (onSaveRemark(device.id, remark)) {
+                                editingRemark = false
+                                snackbar.show("备注已保存")
+                            } else {
+                                remarkError = "保存失败，请重试"
+                                if (snackbar.notice.value?.id == before) snackbar.show(remarkError!!, error = true)
+                            }
+                        } finally { savingRemark = false }
+                    }
                 }
-            }) { Text(if (savingRemark) "保存中" else "保存") }
+            )
         }
     )
 }

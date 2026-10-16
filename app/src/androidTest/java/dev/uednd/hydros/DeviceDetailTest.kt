@@ -55,6 +55,28 @@ class DeviceDetailTest {
         ui.onNodeWithText("连接设备").assertDoesNotExist()
     }
 
+    @Test fun activeSessionOnSameDeviceDoesNotTriggerInUseRestriction() {
+        var currentDevice by mutableStateOf(device)
+        var sessionStage by mutableStateOf(SessionStage.USING)
+        ui.setContent {
+            HydrosTheme { HydrosSnackbarProvider { HoldActionHost {
+                DeviceDetailScreen(currentDevice, HydrosUiState(session = SessionUi(device, "owner", stage = sessionStage)),
+                    {}, {}, {}, {}, {}, { _, _ -> true })
+            } } }
+        }
+        ui.onNodeWithText("已有设备正在使用，请先结束当前设备").assertDoesNotExist()
+        ui.onNodeWithText("返回使用页面").assertExists()
+
+        ui.runOnIdle { sessionStage = SessionStage.SETTLEMENT_PENDING }
+        ui.onNodeWithText("原设备结算尚未完成，请先返回处理").assertDoesNotExist()
+        ui.onNodeWithText("返回使用页面").assertExists()
+
+        val other = device.copy(id = "other-device")
+        ui.runOnIdle { currentDevice = other }
+        ui.onNodeWithText("原设备结算尚未完成，请先返回处理").assertExists()
+        ui.onNodeWithText("返回使用页面").assertExists()
+    }
+
     @Test fun closedSessionOffersSettlementAndWritebackRetriesAndStopsTimer() {
         var session by mutableStateOf(SessionUi(device, "owner", startedAt = System.currentTimeMillis() - 10_000,
             stage = SessionStage.USING))
