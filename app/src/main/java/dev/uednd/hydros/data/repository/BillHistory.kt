@@ -74,6 +74,7 @@ class BillHistory(
     private fun load(query: Query, force: Boolean = false) {
         selection?.cancel()
         val auth = owner
+        val queryChanged = state.value.month != query.month || state.value.type != query.type
         mutable.value = state.value.copy(month = query.month, type = query.type)
         if (auth == null) return
         if (force) {
@@ -103,7 +104,7 @@ class BillHistory(
             pending.start()
             pending
         }
-        mutable.value = state.value.copy(bills = emptyList(), loading = true, error = null)
+        mutable.value = state.value.copy(bills = if (queryChanged) emptyList() else state.value.bills, loading = true, error = null)
         selection = scope.launch {
             try {
                 val bills = request.await()
@@ -122,15 +123,21 @@ class BillHistory(
         val auth = owner ?: return
         val bill = state.value.bills.find { it.id == id && it.detailAvailable } ?: return
         val query = Query(state.value.month, state.value.type)
-        val version = cache[query]?.version ?: return
+        val cached = cache[query] ?: CachedBills(state.value.bills, nowMillis()).also {
+            cache[query] = it
+            while (cache.size > 24) cache.remove(cache.keys.first())
+        }
+        val version = cached.version
         val startedIn = epoch
         val pending = scope.async(start = CoroutineStart.LAZY) {
             val detail = wallet.detail(auth, bill)
             ensureActive()
             val current = cache[query]
-            if (startedIn == epoch && credentials.value == auth && current?.version === version) {
+            if (startedIn == epoch && credentials.value == auth && (current == null || current.version === version)) {
                 // Detail updates preserve the query version, so concurrent details can both be retained.
-                val updated = current.copy(bills = current.bills.map { if (it.id == id) detail else it })
+                val updated = (current ?: cached).let { base ->
+                    base.copy(bills = base.bills.map { if (it.id == id) detail else it })
+                }
                 cache[query] = updated
                 if (state.value.month == query.month && state.value.type == query.type) {
                     mutable.value = state.value.copy(bills = updated.bills)

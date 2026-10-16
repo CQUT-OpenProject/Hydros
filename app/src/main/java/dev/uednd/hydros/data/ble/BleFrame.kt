@@ -7,11 +7,12 @@ object BleFrame {
     const val TAIL: Int = 0x16
     const val WIRE_START: Int = 0x23   // '#'
     const val WIRE_END: Int = 0x0A     // '\n'
+    const val MAX_PAYLOAD_BYTES = 252
     private const val FLAG: Int = 0x80
 
 
     fun build(cmd: Int, data: ByteArray = ByteArray(0)): ByteArray {
-        require(data.size <= 252) { "BLE payload exceeds frame length" }
+        require(data.size <= MAX_PAYLOAD_BYTES) { "BLE payload exceeds frame length" }
         val len = data.size + 3
         val frame = ByteArray(data.size + 8)
         frame[0] = HEAD.toByte()
@@ -61,7 +62,6 @@ object BleFrame {
         if (frame.size != len + 5) return false          // 总长 = (len-3)+8
         if (frame.last().toInt() and 0xFF != TAIL) return false
         val dataLen = len - 3
-        if (dataLen < 0) return false
         var sum = 0
         for (i in 0 until dataLen) sum += frame[6 + i].toInt() and 0xFF
         val expected = (sum + (frame[3].toInt() and 0xFF) + (frame[4].toInt() and 0xFF)) % 256
@@ -69,12 +69,8 @@ object BleFrame {
     }
 
 
-    fun payloadOf(frame: ByteArray): ByteArray? {
-        if (!verify(frame)) return null
-        val dataLen = (frame[2].toInt() and 0xFF) - 3
-        if (dataLen < 0) return null
-        return frame.copyOfRange(6, 6 + dataLen)
-    }
+    /** Extract from a frame already accepted by verify or parseWire, like cmdOf. */
+    fun payloadOf(frame: ByteArray): ByteArray = frame.copyOfRange(6, frame.size - 2)
 
 
     fun cmdOf(frame: ByteArray): Int = frame[4].toInt() and 0xFF
@@ -109,12 +105,5 @@ object BleFrame {
         in 'a'..'f' -> c - 'a' + 10
         in 'A'..'F' -> c - 'A' + 10
         else -> null
-    }
-
-
-    fun intAt(data: ByteArray, offset: Int): Int {
-        var v = 0
-        for (i in 0 until 4) v = (v shl 8) or (data[offset + i].toInt() and 0xFF)
-        return v
     }
 }

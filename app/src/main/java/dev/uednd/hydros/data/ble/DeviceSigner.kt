@@ -22,12 +22,6 @@ object DeviceSigner {
         }
     }
 
-
-    val isAvailable: Boolean get() = true
-
-
-    val failureReason: String? get() = null
-
     fun md5Hex(s: String): String =
         MessageDigest.getInstance("MD5")
             .digest(s.toByteArray(Charsets.UTF_8))

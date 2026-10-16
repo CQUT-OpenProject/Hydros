@@ -35,7 +35,10 @@ class ProtocolTest {
     }
     @Test fun moneyHasNoFloatingPointOrUnknownZeroFallback() {
         assertEquals(40L, yuanMilli("0.04"))
-        assertEquals(40L, milli("40"))
+        assertEquals(40000L, yuanMilli("40"))
+        assertEquals(0L, yuanMilli("0"))
+        assertEquals(0L, yuanMilli("0.00"))
+        assertEquals(500L, yuanMilli("0.50"))
         assertEquals("0.04", money(displayCents(40)))
         assertEquals(1955L, yuanMilli("1.955"))
         assertEquals("1.96", money(displayCents(1955)))
@@ -74,6 +77,23 @@ class ProtocolTest {
         assertNull(BleFrame.parseWire(wire.copyOf(wire.size-1)))
         val payload=byteArrayOf(0,1,127,-1)
         assertArrayEquals(payload, BleFrame.payloadOf(BleFrame.build(0x85,payload)))
+    }
+    @Test fun everyWireLengthIsValidatedBeforeExtractingItsPayload() {
+        for (length in 0..255) {
+            val frame = ByteArray(length + 5)
+            frame[0] = BleFrame.HEAD.toByte()
+            frame[2] = length.toByte()
+            frame[3] = 0x80.toByte()
+            frame[4] = 0x23
+            frame[frame.lastIndex] = BleFrame.TAIL.toByte()
+            if (frame.size >= 8) frame[frame.lastIndex - 1] = 0xA3.toByte()
+            val parsed = BleFrame.parseWire(BleFrame.toWire(frame))
+            if (length < 3) assertNull(parsed)
+            else {
+                assertNotNull(parsed)
+                assertEquals(length - 3, BleFrame.payloadOf(requireNotNull(parsed)).size)
+            }
+        }
     }
     @Test fun aesWritebackDecryptsServerPacketAndRejectsInvalidData() {
         val cipher=Cipher.getInstance("AES/ECB/PKCS5Padding")

@@ -74,7 +74,7 @@ internal class BleCommandSession(
                 if (all[i].toInt() and 0xFF != BleFrame.WIRE_END) continue
                 val frame = BleFrame.parseWire(all.copyOfRange(start, i + 1))
                 start = i + 1
-                if (frame != null) incoming.trySend(BleFrame.cmdOf(frame) to (BleFrame.payloadOf(frame) ?: ByteArray(0)))
+                if (frame != null) incoming.trySend(BleFrame.cmdOf(frame) to BleFrame.payloadOf(frame))
             }
             buffer.reset()
             if (start < all.size) buffer.write(all, start, all.size - start)

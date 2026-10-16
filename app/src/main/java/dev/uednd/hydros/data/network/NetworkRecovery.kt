@@ -95,7 +95,7 @@ class NetworkRecovery(
     private companion object {
         val READ_ONLY_POSTS = setOf(
             "order/tcpDevice/query/rateOrder/using", "order/tcpDevice/query/downRateResult",
-            "order/tcpDevice/closeOrder/result/query", "order/consumeOrder/result/query",
+            "order/consumeOrder/result/query",
         )
     }
 }

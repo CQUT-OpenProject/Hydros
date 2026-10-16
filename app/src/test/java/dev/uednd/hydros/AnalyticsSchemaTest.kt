@@ -15,7 +15,8 @@ class AnalyticsSchemaTest {
 
     @Test fun resultAndDiagnosticDimensionsAreClosedEnums() {
         assertEquals(setOf("SUCCESS", "PENDING", "FAILURE"), ResultCode.entries.map { it.name }.toSet())
-        assertEquals(setOf("NETWORK", "REJECTED", "PERMISSION", "DEVICE", "INVALID_INPUT", "UNKNOWN"), FailureCategory.entries.map { it.name }.toSet())
+        assertEquals(setOf("NETWORK", "REJECTED", "PERMISSION", "UNKNOWN"), FailureCategory.entries.map { it.name }.toSet())
+        assertEquals(setOf("SHOWER", "DRINK", "WASH"), DeviceType.entries.map { it.name }.toSet())
         assertEquals(setOf("LOGIN", "ACCOUNT", "WALLET", "BILL", "DEVICE", "SESSION", "UPDATE"), NetworkOperation.entries.map { it.name }.toSet())
     }
 }

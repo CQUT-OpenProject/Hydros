@@ -312,6 +312,91 @@ class BillQueryCacheTest {
         assertEquals(2, f.queries.count { it["month"] == "2025-01" })
     }
 
+    @Test fun loadDetailSucceedsEvenIfQueryCacheWasEvictedOrExpired() = testCache { f ->
+        f.transport.script = { path, _ ->
+            if (path.endsWith("bill/detail")) {
+                response("""{"consumeMoney":"0.50","usingTimeDisplay":"3分钟"}""")
+            } else billList("2025-01")
+        }
+        f.history.selectMonth("2025-01")
+        runCurrent()
+        assertEquals(1, f.history.state.value.bills.size)
+        // Evict the query from cache by populating 25 distinct months
+        for (i in 1..25) {
+            val m = "2024-%02d".format(if (i <= 12) i else i - 12) + "-$i"
+            f.history.selectMonth(m)
+            runCurrent()
+        }
+        // Return to 2025-01 month but with bills already rendered on screen
+        f.history.selectMonth("2025-01")
+        runCurrent()
+        assertNull(f.history.state.value.bills.single().durationText)
+
+        // Advance 6 minutes so cache entry expires if present
+        advanceTimeBy(360_000)
+        // Now call loadDetail when cache is expired/missing
+        f.history.loadDetail("bill")
+        runCurrent()
+        assertEquals("3分钟", f.history.state.value.bills.single().durationText)
+    }
+
+    @Test fun refreshSameMonthRetainsExistingBillsDuringLoading() = testCache { f ->
+        val pending = CompletableDeferred<Unit>()
+        f.transport.script = { _, fields ->
+            pending.await()
+            billList(fields.getValue("month"), amount = "1.50")
+        }
+        f.history.selectMonth("2025-01")
+        pending.complete(Unit)
+        runCurrent()
+        assertEquals(1500L, f.history.state.value.bills.single().amountMilli)
+
+        val nextPending = CompletableDeferred<Unit>()
+        f.transport.script = { _, fields ->
+            nextPending.await()
+            billList(fields.getValue("month"), amount = "2.00")
+        }
+        f.history.refresh()
+        runCurrent()
+        // During loading, existing bills must NOT be wiped to emptyList()
+        assertTrue(f.history.state.value.loading)
+        assertEquals(1, f.history.state.value.bills.size)
+        assertEquals(1500L, f.history.state.value.bills.single().amountMilli)
+
+        nextPending.complete(Unit)
+        runCurrent()
+        assertFalse(f.history.state.value.loading)
+        assertEquals(2000L, f.history.state.value.bills.single().amountMilli)
+    }
+
+    @Test fun switchMonthClearsBillsDuringLoading() = testCache { f ->
+        val pending = CompletableDeferred<Unit>()
+        f.transport.script = { _, fields ->
+            pending.await()
+            billList(fields.getValue("month"), amount = "1.50")
+        }
+        f.history.selectMonth("2025-01")
+        pending.complete(Unit)
+        runCurrent()
+        assertEquals(1, f.history.state.value.bills.size)
+
+        val nextPending = CompletableDeferred<Unit>()
+        f.transport.script = { _, fields ->
+            nextPending.await()
+            billList(fields.getValue("month"), amount = "2.00")
+        }
+        f.history.selectMonth("2025-02")
+        runCurrent()
+        // During loading for a different month, existing bills must be cleared
+        assertTrue(f.history.state.value.loading)
+        assertTrue(f.history.state.value.bills.isEmpty())
+
+        nextPending.complete(Unit)
+        runCurrent()
+        assertFalse(f.history.state.value.loading)
+        assertEquals(1, f.history.state.value.bills.size)
+    }
+
     private fun billList(month: String, amount: String = "0.50") = response("""
         [{"consumeBillDTO":{"orderId":"bill","consumeDate":"$month-01 12:00:00","consumeMoney":"$amount"}}]
     """.trimIndent())

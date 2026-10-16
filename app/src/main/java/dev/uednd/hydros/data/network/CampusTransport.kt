@@ -61,8 +61,8 @@ class HttpCampusTransport(private val api: CampusApi, private val isCurrent: (Cr
     }
 
     private fun operationFor(path: String) = when {
-        path.startsWith("user/") -> NetworkOperation.LOGIN
         path.startsWith("account/info") || path.startsWith("project/info") || path.startsWith("user/phone") || path.startsWith("user/password") -> NetworkOperation.ACCOUNT
+        path.startsWith("user/") -> NetworkOperation.LOGIN
         path.startsWith("account/wallet") -> NetworkOperation.WALLET
         path.contains("bill") -> NetworkOperation.BILL
         path.startsWith("device/") -> NetworkOperation.DEVICE
@@ -84,4 +84,3 @@ fun JsonObject.obj(key: String): JsonObject? = get(key) as? JsonObject
 fun yuanMilli(value: String?): Long? = value?.toBigDecimalOrNull()?.takeIf { it >= BigDecimal.ZERO }?.let {
     runCatching { it.movePointRight(3).longValueExact() }.getOrNull()
 }
-fun milli(value: String?): Long? = value?.toBigDecimalOrNull()?.takeIf { it >= BigDecimal.ZERO }?.let { runCatching { it.longValueExact() }.getOrNull() }

@@ -111,4 +111,19 @@ class WalletRepositoryTest {
             assertNull(bill.durationText)
         }
     }
+
+    @Test
+    fun detailRetainsAmountMilliAndLocationWhenDetailOmitted() = runTest {
+        val bill = parseBill(Json.parseToJsonElement(
+            """{"orderId":"7","consumeDate":"2026-10-15 12:30:00","description":"消费:宿舍热水","consumeMoney":"0.50"}"""
+        ) as JsonObject)
+        val repository = RealWalletRepository(RecordingTransport(
+            """{"orderId":"7","usingTimeDisplay":"3分20秒"}"""
+        ))
+        val detail = repository.detail(auth, bill)
+        assertEquals(500L, detail.amountMilli)
+        assertEquals("宿舍热水", detail.title)
+        assertEquals("宿舍热水", detail.location)
+        assertEquals("3分20秒", detail.durationText)
+    }
 }

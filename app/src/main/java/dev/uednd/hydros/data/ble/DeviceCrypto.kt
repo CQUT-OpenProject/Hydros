@@ -15,13 +15,6 @@ object DeviceCrypto {
 
     val aesKey: ByteArray get() = AES_KEY_BYTES.copyOf()
 
-
-    val isAvailable: Boolean get() = true
-
-
-    val failureReason: String? get() = null
-
-
     fun decryptByAes(cipher: String): String? {
         if (cipher.isBlank()) return null
         return try {

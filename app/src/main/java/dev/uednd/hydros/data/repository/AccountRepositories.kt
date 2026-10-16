@@ -4,7 +4,6 @@ import dev.uednd.hydros.data.ble.DeviceSigner
 import dev.uednd.hydros.data.network.*
 import dev.uednd.hydros.data.storage.HydrosStore
 import dev.uednd.hydros.ui.state.*
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -152,9 +151,20 @@ fun parseDate(value: String): LocalDateTime = listOf("yyyy-MM-dd HH:mm:ss", "yyy
 fun parseBill(obj: JsonObject, previous: BillUi? = null): BillUi {
     val id = obj.text("orderId") ?: previous?.id ?: throw ApiFailure(null, "账单缺少编号")
     val date = obj.text("consumeDate") ?: previous?.consumeDate ?: throw ApiFailure(null, "账单缺少消费时间")
-    val description = obj.text("description") ?: previous?.title ?: "消费账单"
-    val recharge = description.contains("充值") || previous?.recharge == true
-    return BillUi(id, description.substringAfter(":"), description.substringAfter(":"), if(recharge) null else category(description),
-        yuanMilli(obj.text("consumeMoney")), parseDate(date), date, obj.text("orderNo") ?: previous?.orderNo,
-        obj.text("usingTimeDisplay")?.trim()?.takeIf(String::isNotEmpty), recharge)
+    val description = obj.text("description")
+    val title = description?.substringAfter(":") ?: previous?.title ?: "消费账单"
+    val location = description?.substringAfter(":") ?: previous?.location ?: title
+    val recharge = description?.contains("充值") == true || previous?.recharge == true
+    return BillUi(
+        id = id,
+        title = title,
+        location = location,
+        category = if (recharge) null else previous?.category ?: category(description ?: title),
+        amountMilli = yuanMilli(obj.text("consumeMoney")) ?: previous?.amountMilli,
+        time = parseDate(date),
+        consumeDate = date,
+        orderNo = obj.text("orderNo") ?: previous?.orderNo,
+        durationText = obj.text("usingTimeDisplay")?.trim()?.takeIf(String::isNotEmpty) ?: previous?.durationText,
+        recharge = recharge,
+    )
 }

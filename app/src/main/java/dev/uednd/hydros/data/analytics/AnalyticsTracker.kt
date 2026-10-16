@@ -4,9 +4,9 @@ import android.os.Bundle
 import com.google.firebase.analytics.FirebaseAnalytics
 
 enum class ResultCode { SUCCESS, PENDING, FAILURE }
-enum class FailureCategory { NETWORK, REJECTED, PERMISSION, DEVICE, INVALID_INPUT, UNKNOWN }
+enum class FailureCategory { NETWORK, REJECTED, PERMISSION, UNKNOWN }
 enum class Channel { BLE, CLOUD }
-enum class DeviceType { SHOWER, DRINK, WASH, OTHER }
+enum class DeviceType { SHOWER, DRINK, WASH }
 enum class NetworkOperation { LOGIN, ACCOUNT, WALLET, BILL, DEVICE, SESSION, UPDATE }
 enum class HttpClass { INFORMATIONAL, SUCCESS, REDIRECT, CLIENT_ERROR, SERVER_ERROR, UNKNOWN }
 enum class RecoveryResult { NOT_NEEDED, RECOVERED, FAILED }
