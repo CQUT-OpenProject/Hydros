@@ -35,7 +35,7 @@ ICONS = {
     "wallet_outline": ("account_balance_wallet", False), "water": ("water_drop", True),
     "display_settings": ("text_fields", True),
 }
-# Chronos uses the Outlined filled/700 glyph at optical size 48 for animation.
+# Use the Outlined filled/700 glyph at optical size 48 for animation.
 SVG_OVERRIDES = {
     "animation": (
         "https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsoutlined/animation/wght700fill1/48px.svg",
