@@ -1,0 +1,8 @@
+# Paho creates its logger and error catalog through reflection. Keep their
+# no-argument constructors without retaining the entire MQTT library.
+-keep,allowoptimization class org.eclipse.paho.client.mqttv3.logging.JSR47Logger {
+    public <init>();
+}
+-keep,allowoptimization class org.eclipse.paho.client.mqttv3.internal.ResourceBundleCatalog {
+    public <init>();
+}

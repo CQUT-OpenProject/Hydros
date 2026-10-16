@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launcher color palette. -->
+    <color name="ic_launcher_blue">#087FE0</color>
+    <color name="ic_launcher_teal">#08B9AE</color>
+    <color name="ic_launcher_orange">#E6AD45</color>
+    <color name="ic_launcher_background">#FFFFFF</color>
+</resources>

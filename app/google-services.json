@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "794850322204",
+    "project_id": "hydros-7999a",
+    "storage_bucket": "hydros-7999a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:794850322204:android:7c37ace175c51393487cd9",
+        "android_client_info": {
+          "package_name": "dev.uednd.hydros"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA32mp_9zXvxNypZsKOG1VYNAgoE15C2HM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

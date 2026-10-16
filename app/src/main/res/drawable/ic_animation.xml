@@ -1,0 +1,6 @@
+<!-- Google Material Symbols; https://fonts.gstatic.com/s/i/short-term/release/materialsymbolsoutlined/animation/wght700fill1/48px.svg; sha256=55ddbee4a15dac36b34ae967f5b5515f6a7f34c16dc0b0c6a2c1d96bad2a8753; Apache-2.0. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="960" android:viewportHeight="960">
+    <group android:translateY="960">
+        <path android:fillColor="@android:color/white" android:pathData="M354-64q-59 0-112-21.5T148-149q-41-40-62.5-92.5T64-354q0-85 42.5-154T219-609q19-41 54-76t79-57q33-70 103-112t152-42q59 0 111.5 21.5T811-811q40 41 62.5 93.5T896-606q0 80-36 145.5T742-352q-17 37-54.5 77T609-219q-33 71-100 113T354-64Zm2-83q37 1 73-15.5t55-44.5q-59 4-112.5-14.5T277-279q-41-40-59-92.5T204-483q-27 22-42 57t-15 72q0 43 15 80.5t45 66.5q29 28 67 43.5t82 16.5Zm126-127q36 0 70-15t57-42q-58 4-111.5-15.5T404-407q-41-42-60-95t-13-112q-33 34-45 62.5T274-480q0 43 15.5 80.5T334-333q29 29 67 44t81 15Z" />
+    </group>
+</vector>

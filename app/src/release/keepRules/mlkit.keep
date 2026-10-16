@@ -1,0 +1,6 @@
+# ML Kit discovers these registrars from manifest metadata and calls their
+# no-argument constructors reflectively. Its bundled consumer rule keeps the
+# classes only; AGP 9 strict full mode does not implicitly keep constructors.
+-keep,allowoptimization class com.google.mlkit.** implements com.google.firebase.components.ComponentRegistrar {
+    public <init>();
+}
