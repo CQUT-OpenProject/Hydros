@@ -1,0 +1,359 @@
+package dev.uednd.hydros.ui.state
+
+import dev.uednd.hydros.data.storage.FeedbackSettings
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dev.uednd.hydros.data.HydrosDependencies
+import dev.uednd.hydros.data.network.*
+import dev.uednd.hydros.data.repository.ReauthenticationNotice
+import dev.uednd.hydros.data.repository.BillHistory
+import dev.uednd.hydros.data.repository.DevicePreparation
+import dev.uednd.hydros.data.repository.NearbyDiscovery
+import dev.uednd.hydros.data.repository.NearbyDiscoveryState
+import dev.uednd.hydros.data.ble.NearbyScanFailure
+import dev.uednd.hydros.data.analytics.*
+import dev.uednd.hydros.ui.state.ControlChannel
+import dev.uednd.hydros.ui.state.DeviceCategory
+import dev.uednd.hydros.ui.theme.ThemeMode
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import java.time.YearMonth
+
+data class HydrosUiState(val initializing: Boolean = true, val signedIn: Boolean = false,
+    val onboardingCompleted: Boolean = false, val reauthentication: ReauthenticationNotice? = null,
+    val analyticsEnabled: Boolean = false,
+    val account: AccountUi = AccountUi(), val wallet: WalletUi = WalletUi(), val devices: List<DeviceUi> = emptyList(),
+    val connectedDeviceIds: List<String> = emptyList(), val favoriteDeviceIds: Set<String> = emptySet(),
+    val deviceRemarks: Map<String, String> = emptyMap(),
+    val nearby: NearbyDiscoveryState = NearbyDiscoveryState(),
+    val bills: List<BillUi> = emptyList(), val session: SessionUi? = null, val connectingId: String? = null,
+    val connectionStage: ConnectionStage = ConnectionStage.IDLE, val theme: ThemeMode = ThemeMode.SYSTEM,
+    val feedback: FeedbackSettings = FeedbackSettings(),
+    val fontSizeScale: Float = 1f,
+    val month: String = YearMonth.now().toString(), val billType: BillType = BillType.CONSUMPTION,
+    val loadingWallet: Boolean = false, val loadingBills: Boolean = false,
+    val networkMessage: String? = null, val connectionMessage: String? = null,
+    val walletError: String? = null, val billsError: String? = null, val message: String? = null, val working: Boolean = false)
+class HydrosViewModel(
+    val graph: HydrosDependencies,
+) : ViewModel() {
+    private val mutable = MutableStateFlow(HydrosUiState())
+    val state = mutable.asStateFlow()
+    private val refreshJobs = mutableListOf<Job>()
+    private val billHistory = BillHistory(graph.wallet, graph.auth.credentials, viewModelScope)
+    private var walletGeneration = 0
+    private val discovery = NearbyDiscovery(graph.nearbyScanner, graph.devices, graph.auth.credentials, viewModelScope)
+    private val preparation = DevicePreparation(
+        graph.auth, graph.devices, graph.sessions, graph.store, viewModelScope,
+        ensureWatch = graph.ensureWatch,
+    )
+    init {
+        viewModelScope.launch {
+            billHistory.state.collect { history ->
+                mutable.update { it.copy(month = history.month, billType = history.type,
+                    bills = history.bills, loadingBills = history.loading,
+                    billsError = history.error?.let(::friendly)) }
+            }
+        }
+        graph.networkRecovery?.let { recovery ->
+            viewModelScope.launch {
+                recovery.cellularRequests.collect { count ->
+                    mutable.update { it.copy(networkMessage = if (count > 0) "正在尝试移动网络…" else null) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            var previous = emptyList<DeviceUi>()
+            var previousError: Exception? = null
+            var priorCompleted = false
+            discovery.state.collect { nearby ->
+                val resolved = nearby.devices.filter { it !in previous }
+                val error = nearby.error?.takeIf { it !== previousError }
+                previous = nearby.devices
+                previousError = nearby.error
+                if (!priorCompleted && nearby.completed) graph.analytics.nearbyScanResult(
+                    if (nearby.error == null) ResultCode.SUCCESS else ResultCode.FAILURE,
+                    nearby.devices.size, nearby.error?.let(::failureCategory))
+                priorCompleted = nearby.completed
+                mutable.update { current -> current.copy(
+                    nearby = nearby,
+                    devices = current.devices.filterNot { old -> resolved.any { it.id == old.id } } + resolved,
+                    message = error?.let(::friendly) ?: current.message,
+                ) }
+            }
+        }
+        viewModelScope.launch {
+            try {
+                val theme = runCatching { ThemeMode.valueOf(graph.store.theme()) }.getOrDefault(ThemeMode.SYSTEM)
+                val onboarding = graph.store.onboardingCompleted()
+                val analyticsEnabled = graph.store.analyticsEnabled()
+                graph.analytics.setCollectionEnabled(onboarding && analyticsEnabled)
+                val feedback = graph.store.feedback()
+                val fontSizeScale = graph.store.fontSizeScale()
+                mutable.update { it.copy(theme=theme, onboardingCompleted=onboarding, analyticsEnabled=analyticsEnabled, feedback=feedback, fontSizeScale=fontSizeScale) }
+                graph.auth.restore()
+                graph.auth.authState.collectLatest { authentication ->
+                    val auth = authentication.credentials
+                    stopDiscovery()
+                    refreshJobs.forEach { it.cancel() }; refreshJobs.clear()
+                    preparation.cancel()
+                    walletGeneration++
+                    if (authentication.reauthentication != null) {
+                        mutable.update { it.copy(signedIn = false, reauthentication = authentication.reauthentication,
+                            initializing = false, loadingWallet = false, loadingBills = false,
+                            walletError = null, billsError = null, message = null) }
+                        return@collectLatest
+                    }
+                    graph.sessions.restore(auth)
+                    val saved = auth?.let { graph.store.account(it.key) }
+                    mutable.update { current -> HydrosUiState(initializing=false, signedIn=auth != null,
+                        onboardingCompleted=current.onboardingCompleted, reauthentication=authentication.reauthentication,
+                        analyticsEnabled=current.analyticsEnabled,
+                        theme=current.theme, feedback=current.feedback, fontSizeScale=current.fontSizeScale,
+                        account=AccountUi(phone=auth?.phone ?: ""), devices=saved?.devices ?: emptyList(),
+                        connectedDeviceIds=saved?.recent ?: emptyList(), favoriteDeviceIds=saved?.favorites ?: emptySet(),
+                        deviceRemarks=saved?.deviceRemarks ?: emptyMap(), session=graph.sessions.session.value) }
+                    if(auth != null) { refresh(); if(graph.sessions.session.value != null) graph.ensureWatch() }
+                }
+            } catch(e: CancellationException) { throw e } catch(e: Exception) { mutable.update { it.copy(initializing=false, message=friendly(e)) } }
+        }
+        viewModelScope.launch {
+            var prior: SessionUi? = null
+            graph.sessions.session.collect { value ->
+                val auth = graph.auth.credentials.value
+                if(value == null || auth?.key == value.ownerKey || auth == null) mutable.update { it.copy(session=value) }
+                if(prior != null && value == null && auth != null) refresh()
+                prior = value
+            }
+        }
+        viewModelScope.launch {
+            var previousConnection = ConnectionStage.IDLE
+            var previousDevice: DeviceUi? = null
+            preparation.state.collect { connection ->
+                val device = connection.device ?: previousDevice
+                if (previousConnection == ConnectionStage.CONNECTING && connection.stage in setOf(ConnectionStage.READY, ConnectionStage.FAILED) && device != null) {
+                    graph.analytics.deviceConnectResult(
+                        if (connection.stage == ConnectionStage.READY) ResultCode.SUCCESS else ResultCode.FAILURE,
+                        if (device.channel == ControlChannel.BLE) Channel.BLE else Channel.CLOUD,
+                        device.category.toAnalyticsType(), connection.error?.let(::failureCategory))
+                }
+                if (connection.device != null) previousDevice = connection.device
+                previousConnection = connection.stage
+                mutable.update { current ->
+                    val ready = connection.device?.takeIf { connection.stage == ConnectionStage.READY }
+                    val devices = if (ready == null) current.devices else {
+                        current.devices.filterNot { it.id == ready.id } + ready
+                    }
+                    current.copy(
+                        connectingId = connection.device?.id,
+                        connectionStage = connection.stage,
+                        connectionMessage = connection.message,
+                        devices = devices,
+                        connectedDeviceIds = if (ready == null) current.connectedDeviceIds else connection.recentDeviceIds,
+                        message = connection.error?.let(::friendly)
+                            ?: connection.message?.takeIf { connection.stage == ConnectionStage.READY } ?: current.message,
+                    )
+                }
+            }
+        }
+    }
+    private fun friendly(error: Exception) = when(error) {
+        is NearbyScanFailure -> error.message
+        is ApiFailure -> error.message
+        is NetworkFailure -> error.message
+        is java.io.IOException -> "网络连接失败，请检查网络后重试"
+        is SecurityException -> "请允许蓝牙权限后重试"
+        else -> "操作未完成，请重试"
+    }
+    suspend fun acknowledgeReauthentication(id: Long) {
+        graph.auth.acknowledgeReauthentication(id)
+        // Restoring the device can wait on an ongoing close operation. Consume the UI notice now.
+        mutable.update { if (it.reauthentication?.id == id) it.copy(reauthentication = null) else it }
+    }
+    fun dismissMessage() { mutable.update { it.copy(message=null) } }
+    fun clearAllData(clear: () -> Boolean): Boolean {
+        if (state.value.session != null || graph.sessions.session.value != null) {
+            mutable.update { it.copy(message = "请先结束当前设备会话，再清除所有数据。") }
+            return false
+        }
+        if (state.value.working) {
+            mutable.update { it.copy(message = "请等待当前操作完成后重试。") }
+            return false
+        }
+        cancelConnection()
+        stopDiscovery()
+        val requested = runCatching(clear).getOrDefault(false)
+        if (!requested) mutable.update { it.copy(message = "清除失败，请重试") }
+        return requested
+    }
+    suspend fun action(allowRecovery: Boolean = false, block: suspend () -> Unit): Boolean {
+        if(mutable.value.working || (!allowRecovery && state.value.reauthentication != null)) return false
+        val owner = graph.auth.credentials.value
+        mutable.update { it.copy(working=true, message=null) }
+        return try { block(); true } catch(e: CancellationException) { throw e }
+        catch(e: Exception) {
+            if ((e !is ApiFailure || !e.expired) && state.value.reauthentication == null && graph.auth.credentials.value == owner) {
+                mutable.update { it.copy(message=friendly(e)) }
+            }
+            false
+        }
+        finally { mutable.update { it.copy(working=false) } }
+    }
+    suspend fun login(phone: String, secret: String, sms: Boolean) = action { graph.auth.login(phone, secret, sms) }
+    suspend fun sendCode(phone: String, type: Int) = action { graph.auth.sendCode(phone, type) }
+    suspend fun saveAccount(form: dev.uednd.hydros.ui.screens.AccountForm, phone: String, old: String, password: String, code: String) = action {
+        if(state.value.session != null) throw ApiFailure(null, "请先结束当前设备使用，再修改账户")
+        when(form) {
+            dev.uednd.hydros.ui.screens.AccountForm.PHONE -> graph.auth.savePhone(phone, code)
+            dev.uednd.hydros.ui.screens.AccountForm.PASSWORD -> {
+                if (old.isNotEmpty()) graph.auth.savePassword(old, password, null)
+                else graph.auth.savePassword(null, password, code)
+            }
+        }
+    }
+    fun theme(mode: ThemeMode) { graph.scope.launch { action { graph.store.theme(mode.name); mutable.update { it.copy(theme=mode) } } } }
+    fun hapticFeedback(enabled: Boolean) = updateFeedback { it.copy(hapticFeedbackEnabled = enabled) }
+    suspend fun fontSizeScale(value: Float): Boolean = action {
+        graph.store.fontSizeScale(value)
+        mutable.update { it.copy(fontSizeScale = value) }
+    }
+    fun reduceMotion(enabled: Boolean) = updateFeedback { it.copy(reduceMotionEnabled = enabled) }
+    private fun updateFeedback(transform: (FeedbackSettings) -> FeedbackSettings) {
+        graph.scope.launch { action {
+            val feedback = graph.store.updateFeedback(transform)
+            mutable.update { it.copy(feedback = feedback) }
+        } }
+    }
+    fun completeOnboarding(analyticsEnabled: Boolean = true) { graph.scope.launch { action {
+        graph.store.analyticsEnabled(analyticsEnabled)
+        graph.store.onboardingCompleted(true)
+        graph.analytics.setCollectionEnabled(analyticsEnabled)
+        mutable.update { it.copy(onboardingCompleted = true, analyticsEnabled = analyticsEnabled) }
+        if (analyticsEnabled) graph.analytics.onboardingComplete()
+    } } }
+    fun setAnalyticsEnabled(enabled: Boolean) {
+        val wasEnabled = state.value.analyticsEnabled
+        graph.analytics.setCollectionEnabled(enabled && state.value.onboardingCompleted)
+        graph.scope.launch {
+            if (!action {
+                graph.store.analyticsEnabled(enabled)
+                mutable.update { it.copy(analyticsEnabled = enabled) }
+            }) graph.analytics.setCollectionEnabled(wasEnabled && state.value.onboardingCompleted)
+        }
+    }
+    fun logout() {
+        graph.scope.launch { action {
+            if(graph.sessions.session.value != null) throw ApiFailure(null, "请先结束或恢复当前设备会话")
+            cancelConnection(); graph.auth.logout()
+        } }
+    }
+    fun toggleFavorite(deviceId: String) {
+        graph.scope.launch { action {
+            val auth = graph.auth.requireCredentials()
+            val saved = graph.store.updateAccount(auth.key) {
+                when {
+                    deviceId in it.favorites -> it.copy(favorites = it.favorites - deviceId, deviceRemarks = it.deviceRemarks - deviceId)
+                    deviceId in it.recent -> it.copy(favorites = it.favorites + deviceId)
+                    else -> it
+                }
+            }
+            if(graph.auth.credentials.value == auth) mutable.update { it.copy(favoriteDeviceIds=saved.favorites, deviceRemarks=saved.deviceRemarks) }
+        } }
+    }
+    suspend fun saveDeviceRemark(deviceId: String, value: String): Boolean = action {
+        val auth = graph.auth.requireCredentials()
+        if (state.value.devices.none { it.id == deviceId }) throw ApiFailure(null, "设备不存在，请重新扫描")
+        if (value.length > DEVICE_REMARK_MAX_LENGTH) throw ApiFailure(null, "设备备注最多 $DEVICE_REMARK_MAX_LENGTH 字")
+        val remark = value.trim()
+        val saved = graph.store.updateAccount(auth.key) {
+            if (deviceId !in it.favorites) throw ApiFailure(null, "请先收藏设备，再设置备注")
+            it.copy(deviceRemarks = if (remark.isEmpty()) it.deviceRemarks - deviceId else it.deviceRemarks + (deviceId to remark))
+        }
+        if (graph.auth.credentials.value != auth) throw ApiFailure(null, "账号已切换，请重试")
+        mutable.update { it.copy(deviceRemarks = saved.deviceRemarks) }
+    }
+    suspend fun scan(mac: String, rssi: Int? = null): String? {
+        val auth = graph.auth.credentials.value ?: return null
+        return try {
+            val device = graph.devices.find(auth, mac, if(rssi != null) mac else null, rssi)
+            if(graph.auth.credentials.value != auth) return null
+            mutable.update { it.copy(devices=it.devices.filterNot { d -> d.id == device.id } + device) }
+            graph.analytics.qrScanResult(ResultCode.SUCCESS)
+            device.id
+        } catch(e: CancellationException) { throw e } catch(e: Exception) { graph.analytics.qrScanResult(ResultCode.FAILURE, failureCategory(e)); if (graph.auth.credentials.value == auth && (e !is ApiFailure || !e.expired)) mutable.update { it.copy(message=friendly(e)) }; null }
+    }
+    fun discoverNearby() = discovery.start()
+    fun stopDiscovery() = discovery.stop()
+    fun connect(device: DeviceUi) {
+        preparation.prepare(device)
+    }
+    fun cancelConnection() {
+        preparation.cancel()
+    }
+    fun start(device: DeviceUi) {
+        if (state.value.working || state.value.session != null) return
+        graph.scope.launch {
+            val completed = action {
+                preparation.startSession(device.id)
+            }
+            val current = graph.sessions.session.value
+            val result = when {
+                current?.stage == SessionStage.USING -> ResultCode.SUCCESS
+                current?.stage == SessionStage.OPEN_UNCONFIRMED -> ResultCode.PENDING
+                else -> ResultCode.FAILURE
+            }
+            graph.analytics.sessionStartResult(result, device.channel.toAnalyticsChannel(), device.category.toAnalyticsType(),
+                if (completed) null else FailureCategory.UNKNOWN)
+        }
+    }
+    fun finish() { if(!state.value.working) graph.scope.launch {
+        val session = graph.sessions.session.value ?: return@launch
+        val completed = action(allowRecovery = true) { graph.ensureWatch(); graph.sessions.finish(graph.auth.credentials.value) }
+        val current = graph.sessions.session.value
+        val result = when {
+            current == null && completed -> ResultCode.SUCCESS
+            current?.stage in setOf(SessionStage.CLOSE_UNCONFIRMED, SessionStage.SETTLEMENT_PENDING, SessionStage.WRITEBACK_PENDING) -> ResultCode.PENDING
+            else -> ResultCode.FAILURE
+        }
+        graph.analytics.sessionFinishResult(result, session.device.channel.toAnalyticsChannel(), session.device.category.toAnalyticsType(),
+            if (completed) null else FailureCategory.UNKNOWN)
+    } }
+    fun reconcile() { graph.scope.launch { action { graph.sessions.reconcile(graph.auth.credentials.value) } } }
+    fun refresh() {
+        val auth = graph.auth.credentials.value ?: return
+        refreshJobs.removeAll { it.isCompleted }
+        val generation=++walletGeneration
+        refreshJobs += viewModelScope.launch {
+            try {
+                val account=graph.account.load(auth)
+                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(account=account) }
+            } catch(e: CancellationException) { throw e } catch(e: Exception) {
+                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(message="账户资料暂无法获取，请刷新重试") }
+            }
+        }
+        refreshJobs += viewModelScope.launch {
+            mutable.update { it.copy(loadingWallet=true, walletError=null) }
+            try {
+                val wallet=graph.wallet.load(auth)
+                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(wallet=wallet, loadingWallet=false) }
+            } catch(e: CancellationException) { throw e } catch(e: Exception) {
+                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(loadingWallet=false, walletError=friendly(e)) }
+            }
+        }
+        billHistory.refresh()
+    }
+    fun loadMonth(month: String) = billHistory.selectMonth(month)
+    fun selectBillType(type: BillType) = billHistory.selectType(type)
+    fun loadDetail(id: String) {
+        viewModelScope.launch { action { billHistory.loadDetail(id) } }
+    }
+}
+private fun DeviceCategory.toAnalyticsType() = when (this) {
+    DeviceCategory.SHOWER -> DeviceType.SHOWER
+    DeviceCategory.DRINK -> DeviceType.DRINK
+    DeviceCategory.WASH -> DeviceType.WASH
+}
+private fun ControlChannel.toAnalyticsChannel() = if (this == ControlChannel.BLE) Channel.BLE else Channel.CLOUD
+fun phoneError(value: String): String? = if(Regex("1[3-9]\\d{9}").matches(value)) null else "请输入 11 位手机号"
+fun passwordError(value: String): String? = if(value.length in 6..32 && value.any { !it.isWhitespace() }) null else "请输入 6–32 位密码"
+fun codeError(value: String): String? = if(Regex("\\d{6}").matches(value)) null else "请输入 6 位验证码"
