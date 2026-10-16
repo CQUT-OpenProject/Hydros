@@ -15,7 +15,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalInspectionMode
 import dev.uednd.hydros.ui.theme.LocalFeedbackSettings
 
-/** Semantic feedback matching Chronos's Android Capacitor haptics, with system touch settings. */
+/** Semantic feedback matching custom Android haptic patterns, with system touch settings. */
 internal class HydrosHaptics(private val view: View, private val enabled: () -> Boolean) {
     private val vibrator by lazy { view.context.getSystemService(VibratorManager::class.java)?.defaultVibrator }
 

@@ -18,6 +18,7 @@ fun PrimaryAction(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     disabledReason: String? = null,
+    icon: Int? = null,
     onClick: () -> Unit
 ) {
     val snackbar = LocalHydrosSnackbar.current
@@ -44,6 +45,10 @@ fun PrimaryAction(
             disabledContentColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.4f)
         )
     ) {
+        if (icon != null) {
+            Glyph(icon, modifier = Modifier.size(20.dp), tint = if (effectiveEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.4f))
+            Spacer(Modifier.width(8.dp))
+        }
         Text(label, style = MaterialTheme.typography.labelLarge)
     }
 }
@@ -99,6 +104,7 @@ fun TextAction(
     enabled: Boolean = true,
     danger: Boolean = false,
     disabledReason: String? = null,
+    trailingIcon: Int? = null,
     onClick: () -> Unit
 ) {
     val snackbar = LocalHydrosSnackbar.current
@@ -125,6 +131,10 @@ fun TextAction(
         )
     ) {
         Text(label, style = MaterialTheme.typography.labelLarge)
+        if (trailingIcon != null) {
+            Spacer(Modifier.width(4.dp))
+            Glyph(trailingIcon, modifier = Modifier.size(16.dp), tint = if (effectiveEnabled) contentColor else contentColor.copy(alpha = 0.4f))
+        }
     }
 }
 

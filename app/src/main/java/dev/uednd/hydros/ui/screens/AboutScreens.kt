@@ -77,8 +77,7 @@ fun AboutScreen(
                 ?: "正在计算占用…", icon = R.drawable.ic_delete_sweep, onClick = { clearDialog = true })
         }
         Section("软件信息") {
-            MineRow("匿名使用统计", onClick = { onAnalyticsEnabled(!analyticsEnabled) },
-                trailing = { Switch(checked = analyticsEnabled, onCheckedChange = onAnalyticsEnabled) })
+            SwitchRow("匿名使用统计", checked = analyticsEnabled, onCheckedChange = onAnalyticsEnabled)
             SubtleDivider()
             MineRow("服务协议", onClick = onTerms)
             SubtleDivider()
@@ -187,11 +186,11 @@ fun OpenSourceLicensesScreen() {
             }
         }
         HydrosDialog(title = "Google Material Symbols", onDismiss = { showSymbols = false },
-            confirmButton = { TextButton(onClick = { showSymbols = false }) { Text("关闭") } }) {
+            confirmButton = { TextAction("关闭", onClick = { showSymbols = false }) }) {
             SelectionContainer {
                 Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text(license ?: "正在加载…", style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = { uri.openUri("https://github.com/google/material-design-icons") }) { Text("查看项目") }
+                    TextAction("查看项目", onClick = { uri.openUri("https://github.com/google/material-design-icons") })
                 }
             }
         }
@@ -208,12 +207,12 @@ fun OpenSourceLicensesScreen() {
                             Text(license.name, fontWeight = FontWeight.SemiBold)
                             Text(license.licenseContent ?: "此许可未提供正文。")
                             license.url?.takeIf { it.startsWith("https://") }?.let { url ->
-                                TextButton(onClick = { uri.openUri(url) }) { Text("查看许可原文") }
+                                TextAction("查看许可原文", onClick = { uri.openUri(url) })
                             }
                         }
                     }
                 }
-            }, confirmButton = { TextButton(onClick = { selected = null }) { Text("关闭") } })
+            }, confirmButton = { TextAction("关闭", onClick = { selected = null }) })
     }
 }
 

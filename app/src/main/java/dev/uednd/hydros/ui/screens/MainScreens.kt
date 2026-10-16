@@ -131,10 +131,7 @@ fun MineScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                TextButton(onClick = onManageAccount) {
-                    Text("管理账户")
-                    Glyph(R.drawable.ic_chevron, modifier = Modifier.size(16.dp))
-                }
+                TextAction("管理账户", trailingIcon = R.drawable.ic_chevron, onClick = onManageAccount)
             }
             SubtleDivider()
             InfoRow("学校", state.account.school)

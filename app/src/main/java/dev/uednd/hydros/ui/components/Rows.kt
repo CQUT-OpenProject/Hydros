@@ -3,6 +3,7 @@ package dev.uednd.hydros.ui.components
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -282,6 +283,69 @@ fun CheckboxRow(
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
+    }
+}
+
+/** Standard switch option row within a Section. */
+@Composable
+fun SwitchRow(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    supporting: String = "",
+    icon: Int? = null,
+    tone: IconTone = IconTone.PRIMARY,
+    enabled: Boolean = true,
+    switchTag: String? = null
+) {
+    val haptics = rememberHydrosHaptics()
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.small)
+            .then(if (switchTag != null) Modifier.testTag(switchTag) else Modifier)
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = {
+                    haptics.medium()
+                    onCheckedChange(it)
+                }
+            )
+            .heightIn(min = 60.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        if (icon != null) {
+            IconTile(res = icon, tone = tone)
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            if (supporting.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = supporting,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = null,
+            enabled = enabled
+        )
     }
 }
 

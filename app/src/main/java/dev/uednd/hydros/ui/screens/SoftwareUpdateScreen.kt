@@ -37,7 +37,7 @@ fun SoftwareUpdateScreen(
     PageColumn {
         AppBrandingHeader("", if (updates.hasUpdate) "建议及时更新以获取最新特性与体验优化" else "")
         when {
-            updates.checking && install.phase == null -> UpdateStatusCard {
+            updates.checking && install.phase == null -> StatusCard {
                 CircularProgressIndicator(Modifier.size(36.dp))
                 Text("正在检查最新版本…", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -72,28 +72,26 @@ fun SoftwareUpdateScreen(
                         }
                         if (install.phase != InstallPhase.VERIFYING) SecondaryAction("取消更新", onClick = onCancel)
                     } else if (release?.installAsset(Build.SUPPORTED_ABIS.toList()) != null) {
-                        Button(onClick = onInstall, modifier = Modifier.fillMaxWidth()) {
-                            Glyph(R.drawable.ic_download, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text("立即安装更新")
-                        }
+                        PrimaryAction("立即安装更新", icon = R.drawable.ic_download, onClick = onInstall)
                     } else {
                         Text("此版本未配置适用于当前设备的 Android 更新包。", style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         release?.let { SecondaryAction("前往更新", icon = R.drawable.ic_open_in_new, onClick = { uri.openUri(it.url) }) }
                     }
-                    if (install.phase == null) TextButton(onClick = onCheck, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("重新检查") }
+                    if (install.phase == null) TextAction("重新检查", onClick = onCheck, modifier = Modifier.align(Alignment.CenterHorizontally))
                 }
             }
-            updates.error != null -> UpdateStatusCard {
+            updates.error != null -> StatusCard {
                 Glyph(R.drawable.ic_info, Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(updates.error, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
-                Button(onClick = onCheck) { Glyph(R.drawable.ic_refresh, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("重试") }
+                PrimaryAction("重试", icon = R.drawable.ic_refresh, onClick = onCheck)
             }
-            else -> UpdateStatusCard {
+            else -> StatusCard {
                 Glyph(R.drawable.ic_check_circle, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
                 Text(if (updates.checked) "当前已是最新版本" else "检查软件更新", style = MaterialTheme.typography.titleMedium)
                 val time = updates.lastChecked?.let { DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault()).format(it) } ?: "-"
                 Text("上次检查于 $time", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedButton(onClick = onCheck) { Glyph(R.drawable.ic_refresh, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text("重新检查") }
+                SecondaryAction("重新检查", icon = R.drawable.ic_refresh, onClick = onCheck)
             }
         }
         Section("更多信息") {
@@ -102,14 +100,6 @@ fun SoftwareUpdateScreen(
             MineRow("源代码仓库", supporting = "UE-DND/Hydros", icon = R.drawable.ic_code,
                 onClick = { uri.openUri(HYDROS_REPOSITORY) }, trailing = { Glyph(R.drawable.ic_open_in_new, Modifier.size(18.dp)) })
         }
-    }
-}
-
-@Composable
-private fun UpdateStatusCard(content: @Composable ColumnScope.() -> Unit) {
-    Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainer) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }
 }
 
@@ -123,10 +113,10 @@ fun ReleaseHistoryScreen(state: ReleaseHistoryUiState, onRelease: (AppRelease) -
             }
         }
         if (state.loading) CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
-        else if (state.error != null) UpdateStatusCard {
+        else if (state.error != null) StatusCard {
             Text(state.error, color = MaterialTheme.colorScheme.error)
-            Button(onClick = onLoad) { Text("重试") }
-        } else if (state.loaded && state.releases.isEmpty() && !state.hasMore) UpdateStatusCard { Text("暂无版本更新记录") }
+            PrimaryAction("重试", onClick = onLoad)
+        } else if (state.loaded && state.releases.isEmpty() && !state.hasMore) StatusCard { Text("暂无版本更新记录") }
         if (!state.loading && state.error == null && state.hasMore) SecondaryAction("加载更多", onClick = onLoad)
     }
 }

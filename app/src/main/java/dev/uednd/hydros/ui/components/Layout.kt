@@ -61,7 +61,7 @@ fun Section(
     // Follow the selected app palette, including an explicit light/dark override.
     val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val shape = MaterialTheme.shapes.medium
-    // Chronos --shadow-raised / --shadow-raised-dark, in logical Android units.
+    // Raised elevation shadows, in logical Android units.
     val shadow = if (dark) {
         Modifier.dropShadow(shape, Shadow(3.dp, Color.Black.copy(alpha = 0.22f), offset = DpOffset(0.dp, 1.dp)))
     } else {

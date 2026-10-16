@@ -298,17 +298,12 @@ private fun LegalStep(
             }
 
             Section {
-                MineRow(
+                SwitchRow(
                     title = "匿名使用统计",
                     supporting = "允许 Firebase Analytics 收集去标识化的功能使用情况，可随时关闭。",
-                    onClick = { onAnalyticsEnabled(!analyticsEnabled) },
-                    trailing = {
-                        Switch(
-                            modifier = Modifier.testTag("analytics-consent"),
-                            checked = analyticsEnabled,
-                            onCheckedChange = onAnalyticsEnabled
-                        )
-                    }
+                    checked = analyticsEnabled,
+                    onCheckedChange = onAnalyticsEnabled,
+                    switchTag = "analytics-consent"
                 )
             }
 
