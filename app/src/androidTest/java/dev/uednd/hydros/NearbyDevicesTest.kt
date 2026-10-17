@@ -65,4 +65,23 @@ class NearbyDevicesTest {
         ui.waitForIdle()
         assertEquals(2, stops)
     }
+    @Test fun partialLookupFailureKeepsSelectableDevicesAndPersistentSummary() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT).forEach {
+            instrumentation.uiAutomation.grantRuntimePermission(instrumentation.targetContext.packageName, it)
+        }
+        val device = DeviceUi("registered", "测试水表", "宿舍", DeviceCategory.SHOWER)
+        var selected: String? = null
+        ui.setContent { HydrosTheme { HydrosSnackbarProvider { Surface {
+            NearbyDevices(NearbyDiscoveryState(hasSearched = true, completed = true, devices = listOf(device),
+                error = java.io.IOException("raw diagnostic"), failedLookups = 1), listOf(device), {}, {}, { selected = it })
+        } } } }
+        ui.onNodeWithText("部分设备信息暂未加载，已找到的设备仍可选择").assertExists()
+        ui.onNodeWithText("测试水表").performClick()
+        assertEquals(device.id, selected)
+        ui.mainClock.advanceTimeBy(5_000)
+        ui.onNodeWithText("部分设备信息暂未加载，已找到的设备仍可选择").assertExists()
+        ui.onNodeWithText("raw diagnostic").assertDoesNotExist()
+    }
+
 }

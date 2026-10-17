@@ -26,6 +26,8 @@ data class NearbyDiscoveryState(
     val completed: Boolean = false,
     val devices: List<DeviceUi> = emptyList(),
     val error: Exception? = null,
+    val failedLookups: Int = 0,
+    val scanFailed: Boolean = false,
 )
 
 /** Main-thread owner of one scan and all its registration queries. */
@@ -85,7 +87,7 @@ class NearbyDiscovery(
                                 } catch (error: CancellationException) {
                                     throw error
                                 } catch (error: Exception) {
-                                    if (ownsAttempt()) mutable.value = mutable.value.copy(error = error)
+                                    if (ownsAttempt()) mutable.value = mutable.value.copy(error = error, failedLookups = mutable.value.failedLookups + 1)
                                 }
                             }
                         }
@@ -94,7 +96,7 @@ class NearbyDiscovery(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (ownsAttempt()) mutable.value = mutable.value.copy(error = error)
+                if (ownsAttempt()) mutable.value = mutable.value.copy(error = error, scanFailed = true)
             } finally {
                 if (ownsAttempt()) mutable.value = mutable.value.copy(searching = false, completed = true)
             }

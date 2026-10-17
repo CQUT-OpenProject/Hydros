@@ -1,5 +1,9 @@
 package dev.uednd.hydros.ui.screens
 
+import android.content.Intent
+import android.provider.Settings
+import androidx.core.net.toUri
+import dev.uednd.hydros.data.feedback.*
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -58,8 +62,19 @@ fun NearbyDevices(
 
     Section("附近设备") {
         if (permissions.values.any { !it }) {
+            InlineState("需要附近设备权限", "请允许附近设备权限后扫描；若系统不再弹出授权窗口，请前往设置开启。")
             SecondaryAction("允许蓝牙", onClick = { request.launch(wanted.toTypedArray()) }, modifier = Modifier.padding(16.dp))
+            TextAction("前往设置", onClick = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri())) })
         } else {
+            if (!state.searching && state.error != null) {
+                val text = when {
+                    state.scanFailed -> (state.error as? dev.uednd.hydros.data.ble.NearbyScanFailure)?.message
+                        ?: failureFeedback(state.error, FailureOperation.SCAN, FailureStage.BLE_CONNECT).text
+                    state.devices.isNotEmpty() -> "部分设备信息暂未加载，已找到的设备仍可选择"
+                    else -> "已发现设备，但设备信息查询失败。" + failureFeedback(state.error, FailureOperation.SCAN).text
+                }
+                InlineState("扫描未全部完成", text)
+            }
             val found = state.devices.map { it.id }.toSet()
             val nearby = devices.filter { it.id in found }
             nearby.forEach { DeviceRow(it, remarks) { onSelect(it.id) } }

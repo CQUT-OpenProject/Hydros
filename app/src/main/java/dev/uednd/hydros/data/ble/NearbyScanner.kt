@@ -44,7 +44,7 @@ class AndroidNearbyScanner(context: Context) : NearbyScanner {
             }
 
             override fun onScanFailed(errorCode: Int) {
-                close(NearbyScanFailure("蓝牙扫描失败（$errorCode），请重试"))
+                close(NearbyScanFailure("蓝牙扫描未完成，请稍后重新扫描"))
             }
         }
         try {
