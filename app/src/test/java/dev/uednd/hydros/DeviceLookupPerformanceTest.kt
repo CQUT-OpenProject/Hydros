@@ -106,7 +106,7 @@ class DeviceLookupPerformanceTest {
     @Test fun failedLookupIsNotCachedAndCanBeRetried() = runTest {
         val transport = ScriptTransport().apply { script = { _, _ -> response(code = 4004) } }
         val repo = RealDeviceRepository(transport, MemoryStore(), ScriptBle(), Mutex())
-        assertTrue(runCatching { repo.find(auth, mac) }.exceptionOrNull() is ApiFailure)
+        assertTrue(runCatching { repo.find(auth, mac) }.exceptionOrNull()?.cause is ApiFailure)
         val failedCalls = transport.requests.size
         transport.script = { _, _ -> info() }
         repo.find(auth, mac)

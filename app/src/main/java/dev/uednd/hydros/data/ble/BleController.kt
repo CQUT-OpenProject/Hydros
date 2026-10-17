@@ -1,5 +1,6 @@
 package dev.uednd.hydros.data.ble
 
+import dev.uednd.hydros.data.feedback.*
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothGatt
@@ -24,7 +25,7 @@ sealed interface BleConnectResult {
 
     data object NoService : BleConnectResult
 
-    data class Failed(val reason: String, val retryable: Boolean = true) : BleConnectResult
+    data class Failed(val reason: FailureReason, val retryable: Boolean = true) : BleConnectResult
 }
 
 @SuppressLint("MissingPermission")
@@ -56,8 +57,11 @@ class BleController(private val context: Context) {
     val connectedMac: String? get() = connectionAddress?.takeIf { ready }
 
     @Volatile private var sawNoService = false
+    @Volatile private var setupFailure: FailureReason? = null
 
     val isReady: Boolean get() = ready
+    private var lastCommandFailure: BleCommandFailure? = null
+    val commandFailure get() = lastCommandFailure
 
     private fun normalizeMac(raw: String): String? {
         val plain = raw.replace(":", "").replace("-", "").uppercase()
@@ -66,25 +70,26 @@ class BleController(private val context: Context) {
     }
 
     suspend fun connect(mac: String, timeoutMs: Long = CONNECT_TIMEOUT_MS): BleConnectResult {
-        val a = adapter ?: return BleConnectResult.Failed("本机没有蓝牙适配器", retryable = false)
-        if (!a.isEnabled) return BleConnectResult.Failed("蓝牙未开启", retryable = false)
+        val a = adapter ?: return BleConnectResult.Failed(FailureReason.UNSUPPORTED, retryable = false)
+        if (!a.isEnabled) return BleConnectResult.Failed(FailureReason.BLUETOOTH_OFF, retryable = false)
 
         val normalized = normalizeMac(mac)
-            ?: return BleConnectResult.Failed("设备地址无效", retryable = false).also {
+            ?: return BleConnectResult.Failed(FailureReason.INVALID_DATA, retryable = false).also {
                 ProtocolLog.e("BLE 连接失败：MAC 格式不对（$mac）", null)
             }
 
         val device = try {
             a.getRemoteDevice(normalized)
-        } catch (t: Throwable) {
+        } catch (t: Exception) {
             ProtocolLog.e("BLE 连接失败：$normalized", t)
-            return BleConnectResult.Failed("设备地址无效", retryable = false)
+            return BleConnectResult.Failed(if (t is SecurityException) FailureReason.PERMISSION else FailureReason.INVALID_DATA, retryable = false)
         }
 
         disconnect()
         connectionAddress = normalized
         ready = false
         sawNoService = false
+        setupFailure = null
         val notifyDone = CompletableDeferred<Boolean>()
         notifySignal = notifyDone
         var connected = false
@@ -96,22 +101,22 @@ class BleController(private val context: Context) {
                     android.bluetooth.BluetoothDevice.TRANSPORT_LE,
                     android.bluetooth.BluetoothDevice.PHY_LE_1M_MASK, callbackHandler)
                 gatt = connection
-                    ?: return@withTimeout BleConnectResult.Failed("系统未能建立蓝牙连接")
+                    ?: return@withTimeout BleConnectResult.Failed(FailureReason.UNKNOWN)
 
                 if (notifyDone.await()) { connected = true; BleConnectResult.Ready }
                 else if (sawNoService) BleConnectResult.NoService
-                else BleConnectResult.Failed("连接中断")
+                else BleConnectResult.Failed(setupFailure ?: FailureReason.DISCONNECTED, retryable = setupFailure != FailureReason.PERMISSION)
             }
         } catch (_: TimeoutCancellationException) {
             ProtocolLog.w("BLE 连接超时（${timeoutMs}ms）：$mac")
 
             if (sawNoService) BleConnectResult.NoService
-            else BleConnectResult.Failed("连接超时，请靠近设备后重试", retryable = false)
+            else BleConnectResult.Failed(FailureReason.TIMEOUT, retryable = false)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Exception) {
             ProtocolLog.e("BLE 连接异常", t)
-            BleConnectResult.Failed("蓝牙连接异常")
+            BleConnectResult.Failed(if (t is SecurityException) FailureReason.PERMISSION else FailureReason.UNKNOWN)
         } finally {
             notifySignal = null
             if (!connected || !ready) disconnect()
@@ -133,19 +138,31 @@ class BleController(private val context: Context) {
     }
 
     suspend fun query(timeoutMs: Long = BleCommandSession.DEFAULT_TIMEOUT_MS): DeviceQueryState? =
-        commands?.query(timeoutMs)
+        command<DeviceQueryState?>(null) { it.query(timeoutMs) }
 
     suspend fun writeRate(downData: ByteArray, timeoutMs: Long = BleCommandSession.DEFAULT_TIMEOUT_MS): Boolean =
-        commands?.writeRate(downData, timeoutMs) == true
+        command(false) { it.writeRate(downData, timeoutMs) }
 
     suspend fun closeValve(timeoutMs: Long = BleCommandSession.DEFAULT_TIMEOUT_MS): Boolean =
-        commands?.closeValve(timeoutMs) == true
+        command(false) { it.closeValve(timeoutMs) }
 
     suspend fun collect(timeoutMs: Long = BleCommandSession.DEFAULT_TIMEOUT_MS): ByteArray? =
-        commands?.collect(timeoutMs)
+        command<ByteArray?>(null) { it.collect(timeoutMs) }
 
     suspend fun writeBack(data: ByteArray, timeoutMs: Long = BleCommandSession.DEFAULT_TIMEOUT_MS): Boolean =
-        commands?.writeBack(data, timeoutMs) == true
+        command(false) { it.writeBack(data, timeoutMs) }
+
+    private suspend fun <T> command(unavailable: T, block: suspend (BleCommandSession) -> T): T {
+        val active = commands
+        if (active == null) { lastCommandFailure = BleCommandFailure.DISCONNECTED; return unavailable }
+        return try { block(active) } finally { lastCommandFailure = active.lastFailure }
+    }
+
+    private fun setupCall(block: () -> Boolean): Boolean = try { block() }
+    catch (error: Exception) {
+        setupFailure = if (error is SecurityException) FailureReason.PERMISSION else FailureReason.UNKNOWN
+        false
+    }
 
     private fun writeChunk(
         g: BluetoothGatt,
@@ -172,7 +189,7 @@ class BleController(private val context: Context) {
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     ProtocolLog.i("BLE 已连接，开始发现服务")
-                    if (runCatching { g.discoverServices() }.getOrDefault(false) != true) disconnect()
+                    if (setupCall { g.discoverServices() } != true) disconnect()
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     ProtocolLog.w("BLE 已断开（status=$status）")
@@ -199,7 +216,7 @@ class BleController(private val context: Context) {
                 return
             }
             writeChar = write
-            if (runCatching { g.setCharacteristicNotification(notify, true) }.getOrDefault(false) != true) {
+            if (setupCall { g.setCharacteristicNotification(notify, true) } != true) {
                 notifySignal?.complete(false)
                 return
             }
@@ -210,7 +227,7 @@ class BleController(private val context: Context) {
                 notifySignal?.takeIf { !it.isCompleted }?.complete(false)
                 return
             }
-            val accepted = runCatching {
+            val accepted = setupCall {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     g.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) == android.bluetooth.BluetoothStatusCodes.SUCCESS
                 } else {
@@ -219,7 +236,7 @@ class BleController(private val context: Context) {
                     @Suppress("DEPRECATION")
                     g.writeDescriptor(cccd)
                 }
-            }.getOrDefault(false)
+            }
             if (!accepted) notifySignal?.complete(false)
         }
 

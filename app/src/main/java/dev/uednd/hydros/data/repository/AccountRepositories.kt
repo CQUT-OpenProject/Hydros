@@ -105,7 +105,7 @@ interface WalletRepository {
 class RealWalletRepository(private val transport: CampusTransport) : WalletRepository {
     override suspend fun load(auth: Credentials): WalletUi {
         val wallet = transport.get("account/wallet", auth = auth).requireData()
-        return WalletUi(yuanMilli(wallet.text("money")))
+        return WalletUi(yuanMilli(wallet.text("money")) ?: throw ApiFailure(null, "余额数据格式不正确"))
     }
     override suspend fun bills(auth: Credentials, month: String, type: BillType): List<BillUi> {
         val response = transport.get("order/query/account/bill/list", mapOf("month" to month, "billRequestType" to type.requestType), auth)

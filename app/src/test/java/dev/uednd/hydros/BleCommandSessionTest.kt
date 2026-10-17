@@ -1,6 +1,7 @@
 package dev.uednd.hydros
 
 import dev.uednd.hydros.data.ble.BleCommandSession
+import dev.uednd.hydros.data.ble.BleCommandFailure
 import dev.uednd.hydros.data.ble.BleFrame
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -95,6 +96,7 @@ class BleCommandSessionTest {
             runCurrent()
             if (!reject) wire.acknowledge(false)
             assertFalse(response.await())
+            assertEquals(BleCommandFailure.SEND_FAILED, wire.commands.lastFailure)
             assertEquals(1, wire.chunks.size)
             assertEquals(1, wire.disconnects)
         }
@@ -108,6 +110,7 @@ class BleCommandSessionTest {
             if (afterWrite) { wire.acknowledge(); runCurrent() }
             wire.commands.onDisconnected()
             assertNull(response.await())
+            assertEquals(BleCommandFailure.DISCONNECTED, wire.commands.lastFailure)
             assertEquals(0, wire.disconnects)
         }
     }
@@ -135,6 +138,7 @@ class BleCommandSessionTest {
             advanceTimeBy(if (afterWrite) 500 else 3_000)
             runCurrent()
             assertNull(response.await())
+            assertEquals(BleCommandFailure.TIMEOUT, old.commands.lastFailure)
             assertEquals(1, old.disconnects)
             old.reply(0x85, byteArrayOf(9))
             old.acknowledge()
@@ -155,9 +159,11 @@ class BleCommandSessionTest {
         val query = async { wire.commands.query() }
         runCurrent(); wire.acknowledge(); wire.reply(0x23, ByteArray(30))
         assertNull(query.await())
+        assertEquals(BleCommandFailure.INVALID_RESPONSE, wire.commands.lastFailure)
         val rate = async { wire.commands.writeRate(byteArrayOf()) }
         runCurrent(); wire.acknowledge(); wire.reply(0x21, byteArrayOf(0))
         assertFalse(rate.await())
+        assertEquals(BleCommandFailure.REJECTED, wire.commands.lastFailure)
         val back = async { wire.commands.writeBack(byteArrayOf()) }
         runCurrent(); wire.acknowledge(); wire.reply(0x86, byteArrayOf())
         assertFalse(back.await())
@@ -193,4 +199,12 @@ class BleCommandSessionTest {
         assertEquals(1, wire.chunks.size)
         assertEquals(1, wire.disconnects)
     }
+    @Test fun permissionRevokedDuringWriteIsReportedWithoutReplay() = runTest {
+        val wire = Wire().apply { accept = { throw SecurityException("revoked") } }
+        assertFalse(wire.commands.closeValve())
+        assertEquals(BleCommandFailure.PERMISSION, wire.commands.lastFailure)
+        assertEquals(1, wire.chunks.size)
+        assertEquals(1, wire.disconnects)
+    }
+
 }

@@ -1,7 +1,10 @@
 package dev.uednd.hydros.data.ble
 
+import dev.uednd.hydros.data.feedback.*
+
 /** Injectable boundary: tests never connect to real hardware. Callers serialize complete transactions. */
 interface BlePort {
+    val commandFailure: BleCommandFailure? get() = null
     val ready: Boolean
     /** Actual air address of the ready connection; absent while disconnected or connecting. */
     val connectedMac: String?
@@ -14,6 +17,7 @@ interface BlePort {
     fun disconnect()
 }
 class AndroidBlePort(private val controller: BleController) : BlePort {
+    override val commandFailure get() = controller.commandFailure
     override val ready get() = controller.isReady
     override val connectedMac get() = controller.connectedMac
     override suspend fun connect(mac: String) = controller.connect(mac)
@@ -36,4 +40,27 @@ suspend fun BlePort.connectWithRetry(mac: String): BleConnectResult =
         disconnect()
         kotlinx.coroutines.delay(350)
         connect(mac)
-    } ?: BleConnectResult.Failed("连接超时，请靠近设备后重试", retryable = false).also { disconnect() }
+    } ?: BleConnectResult.Failed(FailureReason.TIMEOUT, retryable = false).also { disconnect() }
+
+/** A complete command is serialized by the repository; the failure belongs to its last result. */
+enum class BleCommandFailure { DISCONNECTED, TIMEOUT, SEND_FAILED, INVALID_RESPONSE, REJECTED, PERMISSION }
+fun BleConnectResult.requireReady(operation: FailureOperation) {
+    when (this) {
+        BleConnectResult.Ready -> Unit
+        BleConnectResult.NoService -> throw AppFailure(operation, FailureStage.BLE_CONNECT, FailureReason.UNSUPPORTED)
+        is BleConnectResult.Failed -> throw AppFailure(operation, FailureStage.BLE_CONNECT, reason)
+    }
+}
+fun BlePort.commandError(operation: FailureOperation): AppFailure = AppFailure(operation, FailureStage.BLE_COMMAND,
+    when (commandFailure) {
+        BleCommandFailure.DISCONNECTED -> FailureReason.DISCONNECTED
+        BleCommandFailure.TIMEOUT -> FailureReason.TIMEOUT
+        BleCommandFailure.PERMISSION -> FailureReason.PERMISSION
+        BleCommandFailure.INVALID_RESPONSE -> FailureReason.INVALID_DATA
+        BleCommandFailure.REJECTED -> FailureReason.REJECTED
+        else -> FailureReason.UNKNOWN
+    }, businessMessage = when (commandFailure) {
+        BleCommandFailure.REJECTED -> "设备未接受操作，请重新核实设备状态"
+        BleCommandFailure.INVALID_RESPONSE -> "设备响应异常，请重新连接；持续失败请联系服务商"
+        else -> null
+    })

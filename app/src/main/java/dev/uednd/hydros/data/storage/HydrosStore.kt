@@ -1,5 +1,6 @@
 package dev.uednd.hydros.data.storage
 
+import dev.uednd.hydros.data.feedback.*
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -51,10 +52,10 @@ class PreferencesHydrosStore(context: Context) : HydrosStore {
     private val json = Json { ignoreUnknownKeys = true }
     private val lock = Mutex()
     private val secret = CredentialCipher()
-    private suspend fun read(): SavedSettings = preferences.data.first()[key]?.let {
+    private suspend fun read(): SavedSettings = failureBoundary(FailureOperation.RESTORE, FailureStage.STORAGE) { preferences.data.first()[key]?.let {
         json.decodeFromString<SavedSettings>(it)
-    } ?: SavedSettings()
-    private suspend fun edit(transform: (SavedSettings) -> SavedSettings): SavedSettings = lock.withLock {
+    } ?: SavedSettings() }
+    private suspend fun edit(transform: (SavedSettings) -> SavedSettings): SavedSettings = failureBoundary(FailureOperation.SETTINGS, FailureStage.STORAGE) { lock.withLock {
         var next: SavedSettings?=null
         preferences.edit { prefs ->
             val existing=prefs[key]?.let { json.decodeFromString<SavedSettings>(it) } ?: SavedSettings()
@@ -63,7 +64,7 @@ class PreferencesHydrosStore(context: Context) : HydrosStore {
             next=updated
         }
         requireNotNull(next)
-    }
+    } }
     override suspend fun credentials(): Credentials? {
         val encoded = read().token ?: return null
         return try { json.decodeFromString<Credentials>(secret.decrypt(encoded)) }

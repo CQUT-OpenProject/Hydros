@@ -50,7 +50,7 @@ class NetworkRecoveryTest {
         assertEquals(2, access.releases)
         assertEquals(listOf(false, true, true), events.map { it.cellular })
         access.api.script = { throw ConnectException() }
-        assertTrue(runCatching { transport.post("order/tcpDevice/downRate/rateOrder") }.exceptionOrNull() is NetworkFailure)
+        assertTrue(runCatching { transport.post("order/tcpDevice/downRate/rateOrder") }.exceptionOrNull()?.cause is NetworkFailure)
         assertEquals(1, default.calls) // Failed mutation cannot be replayed on another route.
         assertEquals(3, access.api.calls)
         assertEquals(3, access.releases)
@@ -70,11 +70,11 @@ class NetworkRecoveryTest {
         val default = Api().apply { script = { throw SSLHandshakeException("certificate") } }
         val access = Access()
         val transport = transport(default, NetworkRecovery(access))
-        assertTrue(runCatching { transport.get("device/info/mac") }.exceptionOrNull() is SSLHandshakeException)
+        assertTrue(runCatching { transport.get("device/info/mac") }.exceptionOrNull()?.cause is SSLHandshakeException)
         default.script = { Response.success(response(code = 306)) }
         assertEquals(306, transport.get("device/info/mac").errorCode)
         default.script = { Response.error(503, "".toResponseBody()) }
-        assertEquals(503, (runCatching { transport.get("device/info/mac") }.exceptionOrNull() as ApiFailure).code)
+        assertEquals(503, (runCatching { transport.get("device/info/mac") }.exceptionOrNull()?.cause as ApiFailure).code)
         assertEquals(0, access.acquisitions)
     }
 
@@ -128,11 +128,11 @@ class NetworkRecoveryTest {
         val access = Access().apply { acquire = { throw NetworkFailure("移动网络不可用") } }
         val recovery = NetworkRecovery(access, now = { testScheduler.currentTime })
         val transport = transport(default, recovery)
-        assertTrue(runCatching { transport.get("device/info/mac") }.exceptionOrNull() is NetworkFailure)
+        assertTrue(runCatching { transport.get("device/info/mac") }.exceptionOrNull()?.cause is NetworkFailure)
         assertEquals(0, recovery.cellularRequests.value)
         access.acquire = {}
         access.api.script = { awaitCancellation() }
-        assertTrue(runCatching { transport.get("device/info/mac") }.exceptionOrNull() is NetworkFailure)
+        assertTrue(runCatching { transport.get("device/info/mac") }.exceptionOrNull()?.cause is NetworkFailure)
         assertEquals(5_000L, testScheduler.currentTime)
         assertEquals(2, default.calls)
         assertEquals(1, access.api.calls)

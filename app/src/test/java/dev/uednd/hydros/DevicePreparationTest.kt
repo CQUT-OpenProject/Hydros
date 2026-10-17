@@ -188,7 +188,8 @@ class DevicePreparationTest {
         fixture.preparation.prepare(fixture.device(firstMac))
         runCurrent()
         assertEquals(ConnectionStage.FAILED, fixture.preparation.state.value.stage)
-        assertTrue(fixture.preparation.state.value.error is IOException)
+        assertTrue(fixture.preparation.state.value.error is dev.uednd.hydros.data.feedback.AppFailure)
+        assertTrue(fixture.preparation.state.value.error?.cause is IOException)
         assertFalse(fixture.ble.ready)
 
         fixture.transport.script = normal

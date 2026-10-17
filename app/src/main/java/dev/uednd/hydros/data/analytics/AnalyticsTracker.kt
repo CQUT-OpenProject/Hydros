@@ -58,6 +58,12 @@ class FirebaseAnalyticsTracker(private val analytics: FirebaseAnalytics) : Analy
 }
 
 fun failureCategory(error: Throwable): FailureCategory = when (error) {
+    is dev.uednd.hydros.data.feedback.AppFailure -> when (error.reason) {
+        dev.uednd.hydros.data.feedback.FailureReason.NETWORK, dev.uednd.hydros.data.feedback.FailureReason.TIMEOUT -> FailureCategory.NETWORK
+        dev.uednd.hydros.data.feedback.FailureReason.PERMISSION -> FailureCategory.PERMISSION
+        dev.uednd.hydros.data.feedback.FailureReason.REJECTED -> FailureCategory.REJECTED
+        else -> FailureCategory.UNKNOWN
+    }
     is java.io.IOException -> FailureCategory.NETWORK
     is SecurityException -> FailureCategory.PERMISSION
     is dev.uednd.hydros.data.network.ApiFailure -> if (error.code == null) FailureCategory.UNKNOWN else FailureCategory.REJECTED

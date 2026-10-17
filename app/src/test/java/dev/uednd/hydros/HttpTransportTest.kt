@@ -68,10 +68,10 @@ class HttpTransportTest {
             val transport = HttpCampusTransport(CampusApiFactory.create(server.url("/").toString()), isCurrent = { valid }) {
                 fail("Ordinary failure must not expire credentials")
             }
-            assertFalse((runCatching { transport.get("account/info", auth = auth) }.exceptionOrNull() as ApiFailure).expired)
+            assertFalse((runCatching { transport.get("account/info", auth = auth) }.exceptionOrNull()?.let { if (it is ApiFailure) it else it.cause } as ApiFailure).expired)
             assertFalse(transport.get("account/info", auth = auth).ok)
             valid = false
-            assertTrue((runCatching { transport.get("account/info", auth = auth) }.exceptionOrNull() as ApiFailure).expired)
+            assertTrue((runCatching { transport.get("account/info", auth = auth) }.exceptionOrNull()?.let { if (it is ApiFailure) it else it.cause } as ApiFailure).expired)
             assertEquals(2, server.requestCount)
         } finally { server.close() }
     }
@@ -82,7 +82,7 @@ class HttpTransportTest {
             repeat(2) { server.enqueue(MockResponse.Builder().code(403).body("{}").build()) }
             var expirations = 0
             val transport = HttpCampusTransport(CampusApiFactory.create(server.url("/").toString())) { expirations++ }
-            val anonymous = runCatching { transport.post("user/login") }.exceptionOrNull() as ApiFailure
+            val anonymous = runCatching { transport.post("user/login") }.exceptionOrNull()?.cause as ApiFailure
             assertFalse(anonymous.expired)
             val protected = runCatching { transport.get("account/info", auth = auth) }.exceptionOrNull() as ApiFailure
             assertTrue(protected.expired)

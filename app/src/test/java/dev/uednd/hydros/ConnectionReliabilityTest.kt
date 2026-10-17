@@ -145,7 +145,7 @@ class ConnectionReliabilityTest {
         val ble = object : BlePort by ScriptBle() {
             override suspend fun connect(mac: String): BleConnectResult {
                 attempts++
-                return BleConnectResult.Failed("temporary")
+                return BleConnectResult.Failed(dev.uednd.hydros.data.feedback.FailureReason.DISCONNECTED)
             }
         }
         val connection = launch { ble.connectWithRetry(device.connectMac) }
@@ -161,7 +161,7 @@ class ConnectionReliabilityTest {
         val ble = object : BlePort by base {
             override suspend fun connect(mac: String): BleConnectResult {
                 calls++
-                return BleConnectResult.Failed("temporary")
+                return BleConnectResult.Failed(dev.uednd.hydros.data.feedback.FailureReason.DISCONNECTED)
             }
         }
         assertTrue(ble.connectWithRetry(device.connectMac) is BleConnectResult.Failed)
@@ -176,7 +176,7 @@ class ConnectionReliabilityTest {
         val ble = object : BlePort by ScriptBle() {
             override suspend fun connect(mac: String): BleConnectResult {
                 attempts++
-                if (attempts == 1) { delay(10_000); return BleConnectResult.Failed("temporary") }
+                if (attempts == 1) { delay(10_000); return BleConnectResult.Failed(dev.uednd.hydros.data.feedback.FailureReason.DISCONNECTED) }
                 awaitCancellation()
             }
             override fun disconnect() { disconnected = true }
@@ -189,7 +189,7 @@ class ConnectionReliabilityTest {
     }
 
     @Test fun unsupportedAndPermanentFailuresDoNotRetry() = runTest {
-        for (result in listOf(BleConnectResult.NoService, BleConnectResult.Failed("disabled", retryable = false))) {
+        for (result in listOf(BleConnectResult.NoService, BleConnectResult.Failed(dev.uednd.hydros.data.feedback.FailureReason.BLUETOOTH_OFF, retryable = false))) {
             var calls = 0
             val ble = object : BlePort by ScriptBle() {
                 override suspend fun connect(mac: String): BleConnectResult { calls++; return result }

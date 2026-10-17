@@ -77,15 +77,13 @@ class WalletRepositoryTest {
     }
 
     @Test
-    fun loadWalletWithMissingMoneyReturnsNullTotalMilli() = runTest {
+    fun missingBalanceIsADataErrorRatherThanAnEmptySuccessfulRefresh() = runTest {
         val transport = RecordingTransport("""{}""")
         val repository = RealWalletRepository(transport)
 
-        val wallet = repository.load(auth)
-
+        val failure = runCatching { repository.load(auth) }.exceptionOrNull()
+        org.junit.Assert.assertTrue(failure is dev.uednd.hydros.data.network.ApiFailure)
         assertEquals(listOf("account/wallet"), transport.requestedPaths)
-        assertNull(wallet.totalMilli)
-        assertNull(wallet.totalCents)
     }
 
     @Test

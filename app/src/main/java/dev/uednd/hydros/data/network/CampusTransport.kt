@@ -1,5 +1,6 @@
 package dev.uednd.hydros.data.network
 
+import dev.uednd.hydros.data.feedback.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import java.math.BigDecimal
@@ -37,7 +38,7 @@ class HttpCampusTransport(private val api: CampusApi, private val isCurrent: (Cr
         val response = recovery?.execute(api, path, post, request) ?: request(api)
         if (auth != null && !isCurrent(auth)) throw ApiFailure(null, "登录状态已变化", true)
         if (auth != null && response.code() in listOf(401, 403)) { onExpired(auth); throw ApiFailure(response.code(), "登录已失效，请重新登录", true) }
-        if (!response.isSuccessful) throw ApiFailure(response.code(), "服务请求失败（${response.code()}）")
+        if (!response.isSuccessful) throw AppFailure(feedbackOperationFor(path), FailureStage.RESPONSE, FailureReason.REJECTED, ApiFailure(response.code(), "HTTP rejection"))
         val body = response.body() ?: throw ApiFailure(null, "服务返回为空")
         if (auth != null && !body.ok && isSessionExpiry(body.displayMessage)) {
             onExpired(auth); throw ApiFailure(body.errorCode, "登录已失效，请重新登录", true)
@@ -47,8 +48,10 @@ class HttpCampusTransport(private val api: CampusApi, private val isCurrent: (Cr
         } catch (error: kotlinx.coroutines.CancellationException) {
             throw error
         } catch (error: Exception) {
-            val http = (error as? ApiFailure)?.code?.let(::httpClass) ?: HttpClass.UNKNOWN
+            val http = ((error as? ApiFailure) ?: (error.cause as? ApiFailure))?.code?.let(::httpClass) ?: HttpClass.UNKNOWN
             onDiagnostic(operationFor(path), failureCategory(error), http, RecoveryResult.FAILED)
+            if (error is java.io.IOException || error is kotlinx.serialization.SerializationException)
+                throw classifyFailure(error, feedbackOperationFor(path), FailureStage.NETWORK)
             throw error
         }
     }
@@ -58,6 +61,20 @@ class HttpCampusTransport(private val api: CampusApi, private val isCurrent: (Cr
     private fun httpClass(code: Int) = when (code / 100) {
         1 -> HttpClass.INFORMATIONAL; 2 -> HttpClass.SUCCESS; 3 -> HttpClass.REDIRECT
         4 -> HttpClass.CLIENT_ERROR; 5 -> HttpClass.SERVER_ERROR; else -> HttpClass.UNKNOWN
+    }
+
+    private fun feedbackOperationFor(path: String) = when {
+        path == "user/verification/code/get" -> FailureOperation.CODE
+        path.startsWith("user/phone") || path.startsWith("user/password") -> FailureOperation.ACCOUNT
+        path.startsWith("user/") -> FailureOperation.LOGIN
+        path == "account/wallet" -> FailureOperation.WALLET
+        path.endsWith("bill/detail") -> FailureOperation.DETAIL
+        path.contains("bill") -> FailureOperation.BILLS
+        path.startsWith("device/") -> FailureOperation.SCAN
+        path.contains("query/rateOrder/using") -> FailureOperation.DEVICE
+        path.contains("downRate") -> FailureOperation.START
+        path.startsWith("order/") -> FailureOperation.FINISH
+        else -> FailureOperation.PROFILE
     }
 
     private fun operationFor(path: String) = when {

@@ -35,6 +35,8 @@ internal class BleCommandSession(
         private const val ACK_OK = 0x80
     }
 
+    var lastFailure: BleCommandFailure? = null
+        private set
     private val lock = Any()
     private val incoming = Channel<Pair<Int, ByteArray>>(32)
     private val buffer = ByteArrayOutputStream()
@@ -87,13 +89,21 @@ internal class BleCommandSession(
             val chunk = wire.copyOfRange(offset, minOf(offset + 20, wire.size))
             val signal = CompletableDeferred<Boolean>()
             val accepted = synchronized(lock) {
-                if (closed) return false
+                if (closed) { lastFailure = BleCommandFailure.DISCONNECTED; return false }
                 writeSignal = signal
                 try { writeChunk(chunk) } catch (error: CancellationException) { throw error }
-                catch (_: Exception) { false }
+                catch (error: Exception) {
+                    lastFailure = if (error is SecurityException) BleCommandFailure.PERMISSION else BleCommandFailure.SEND_FAILED
+                    false
+                }
             }
             try {
-                if (!accepted || withTimeoutOrNull(3_000L) { signal.await() } != true) return false
+                if (!accepted) { if (lastFailure == null) lastFailure = BleCommandFailure.SEND_FAILED; return false }
+                val ack = withTimeoutOrNull(3_000L) { signal.await() }
+                if (ack != true) {
+                    lastFailure = if (closed) BleCommandFailure.DISCONNECTED else if (ack == null) BleCommandFailure.TIMEOUT else BleCommandFailure.SEND_FAILED
+                    return false
+                }
             } finally {
                 synchronized(lock) { if (writeSignal === signal) writeSignal = null }
             }
@@ -104,7 +114,8 @@ internal class BleCommandSession(
     }
 
     private suspend fun exchange(cmd: Int, data: ByteArray = ByteArray(0), timeoutMs: Long): ByteArray? {
-        if (closed) return null
+        lastFailure = null
+        if (closed) { lastFailure = BleCommandFailure.DISCONNECTED; return null }
         while (incoming.tryReceive().isSuccess) { }
         return try {
             if (!write(BleFrame.cmdToWire(cmd, data))) { retire(); return null }
@@ -118,7 +129,7 @@ internal class BleCommandSession(
                 }
                 @Suppress("UNREACHABLE_CODE") null
             }
-            if (result == null) retire()
+            if (result == null) { lastFailure = if (closed) BleCommandFailure.DISCONNECTED else BleCommandFailure.TIMEOUT; retire() }
             result
         } catch (error: CancellationException) {
             retire()
@@ -127,7 +138,8 @@ internal class BleCommandSession(
     }
 
     suspend fun query(timeoutMs: Long = DEFAULT_TIMEOUT_MS): DeviceQueryState? {
-        val payload = exchange(CMD_QUERY, timeoutMs = timeoutMs)?.takeIf { it.size >= 31 } ?: return null
+        val payload = exchange(CMD_QUERY, timeoutMs = timeoutMs) ?: return null
+        if (payload.size < 31) { lastFailure = BleCommandFailure.INVALID_RESPONSE; return null }
         return DeviceQueryState(
             protocolType = "%02X".format(payload[19].toInt() and 0xFF),
             randomNumber = BleFrame.toHex(payload.copyOfRange(24, 28)),
@@ -137,8 +149,12 @@ internal class BleCommandSession(
         )
     }
 
-    private suspend fun acknowledged(cmd: Int, data: ByteArray = ByteArray(0), timeoutMs: Long): Boolean =
-        exchange(cmd, data, timeoutMs)?.firstOrNull()?.let { it.toInt() and 0xFF == ACK_OK } == true
+    private suspend fun acknowledged(cmd: Int, data: ByteArray = ByteArray(0), timeoutMs: Long): Boolean {
+        val reply = exchange(cmd, data, timeoutMs) ?: return false
+        if (reply.isEmpty()) { lastFailure = BleCommandFailure.INVALID_RESPONSE; return false }
+        if (reply[0].toInt() and 0xFF != ACK_OK) { lastFailure = BleCommandFailure.REJECTED; return false }
+        return true
+    }
 
     suspend fun writeRate(data: ByteArray, timeoutMs: Long = DEFAULT_TIMEOUT_MS) = acknowledged(CMD_RATE, data, timeoutMs)
     suspend fun closeValve(timeoutMs: Long = DEFAULT_TIMEOUT_MS) = acknowledged(CMD_CLOSE, timeoutMs = timeoutMs)
