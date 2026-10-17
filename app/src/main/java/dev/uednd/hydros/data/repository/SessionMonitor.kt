@@ -6,6 +6,7 @@ import dev.uednd.hydros.ui.state.ControlChannel
 import dev.uednd.hydros.ui.state.SessionUi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.StateFlow
@@ -59,15 +60,20 @@ class SessionMonitor(
                     push.close()
                     if (target == null) return@collectLatest
 
-                    try {
-                        push.subscribe(target.auth, target.orderNo) { signals.trySend(target) }
-                        awaitCancellation()
-                    } catch (error: CancellationException) {
-                        throw error
-                    } catch (_: Exception) {
-                        // Polling keeps the session recoverable when push is unavailable.
-                    } finally {
-                        push.close()
+                    var retryMillis = 3_000L
+                    while (isActive) {
+                        try {
+                            push.subscribe(target.auth, target.orderNo) { signals.trySend(target) }
+                            awaitCancellation()
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (_: Exception) {
+                            // Keep HTTP polling alive while a blocked/unavailable push connection recovers.
+                        } finally {
+                            push.close()
+                        }
+                        delay(retryMillis)
+                        retryMillis = (retryMillis * 2).coerceAtMost(60_000)
                     }
                 }
         }

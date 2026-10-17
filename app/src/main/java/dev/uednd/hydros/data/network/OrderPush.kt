@@ -24,7 +24,12 @@ class MqttOrderPush(private val server: String = "tcp://47.107.37.60:1883") : Or
         close()
         val value = MqttAsyncClient(server, "hydros-${UUID.randomUUID()}", MemoryPersistence())
         client = value
-        value.setCallback(object : MqttCallback {
+        val topics = arrayOf("app_downRate_${auth.phone}", "app_shutdownOrder_${auth.phone}", "app_uploadData_${auth.phone}")
+        val qos = intArrayOf(0, 0, 0)
+        value.setCallback(object : MqttCallbackExtended {
+            override fun connectComplete(reconnect: Boolean, serverURI: String?) {
+                if (reconnect && client === value) runCatching { value.subscribe(topics, qos) }
+            }
             override fun connectionLost(cause: Throwable?) = Unit
             override fun deliveryComplete(token: IMqttDeliveryToken?) = Unit
             override fun messageArrived(topic: String?, message: MqttMessage?) {
@@ -33,9 +38,9 @@ class MqttOrderPush(private val server: String = "tcp://47.107.37.60:1883") : Or
             }
         })
         try {
-            value.connect(MqttConnectOptions().apply { isCleanSession=true; connectionTimeout=5; keepAliveInterval=30 }).waitForCompletion(6000)
-            value.subscribe(arrayOf("app_downRate_${auth.phone}", "app_shutdownOrder_${auth.phone}", "app_uploadData_${auth.phone}"), intArrayOf(0,0,0)).waitForCompletion(6000)
-        } catch(_: MqttException) { close() } // HTTP monitor continues even when port 1883 is blocked.
+            value.connect(MqttConnectOptions().apply { isCleanSession=true; isAutomaticReconnect=true; connectionTimeout=5; keepAliveInterval=30 }).waitForCompletion(6000)
+            value.subscribe(topics, qos).waitForCompletion(6000)
+        } catch(error: MqttException) { close(); throw error } // The monitor retries; HTTP polling remains authoritative.
     }
     override fun close() {
         val old = client; client = null
