@@ -1,5 +1,6 @@
 package dev.uednd.hydros.ui.components
 
+import dev.uednd.hydros.data.feedback.*
 import androidx.lifecycle.repeatOnLifecycle
 
 import androidx.compose.animation.core.Animatable
@@ -132,10 +133,10 @@ private fun HydrosSnackbarHost(bottomPadding: Dp = 0.dp, modalOwner: Any? = null
 
 /** Announce a state transition once; transient details never become permanent page text. */
 @Composable
-internal fun SnackbarMessage(message: String?, eventKey: Any? = message, action: SnackbarAction? = null, error: Boolean = true) {
+internal fun SnackbarMessage(message: String?, eventKey: Any? = message, action: SnackbarAction? = null, error: Boolean = true, source: String = "user", severity: FeedbackSeverity = if (error) FeedbackSeverity.ERROR else FeedbackSeverity.INFO) {
     val snackbar = LocalHydrosSnackbar.current
     DisposableEffect(snackbar, message, eventKey) {
-        val ticket = message?.let { snackbar.show(it, action, error) }
+        val ticket = message?.let { snackbar.show(it, action, error, source = source, severity = severity, dedupKey = eventKey?.toString()) }
         onDispose { ticket?.let { snackbar.dismiss(it.id) } }
     }
 }

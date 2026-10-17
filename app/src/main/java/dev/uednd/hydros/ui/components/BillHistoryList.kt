@@ -23,6 +23,7 @@ fun LazyListScope.billHistoryList(
     bills: List<BillUi>,
     loading: Boolean,
     error: Boolean,
+    errorMessage: String? = null,
     onMonth: (String) -> Unit,
     onBillType: (BillType) -> Unit,
     onBill: (String) -> Unit
@@ -70,7 +71,7 @@ fun LazyListScope.billHistoryList(
             InlineState("正在加载${billType.label}", "正在查询所选月份…", loading = true)
         }
         error -> item("bills-error", "error") {
-            SecondaryAction("重新加载${billType.label}", onClick = { onMonth(month) })
+            InlineState("${billType.label}加载未完成", errorMessage ?: "请重新加载账单", action = "重新加载${billType.label}", onAction = { onMonth(month) })
         }
         monthBills.isEmpty() -> item("bills-empty", "empty") {
             StateCard("所选月份暂无${billType.label}", "服务端尚无对应记录。")

@@ -170,7 +170,7 @@ fun AccountFormScreen(form: AccountForm, account: AccountUi, onSend: suspend (St
                     val saveOld = if (form == AccountForm.PASSWORD && !sms) oldPassword else ""
                     val saveCode = if (form == AccountForm.PHONE || sms) code else ""
                     if(onSave(targetPhone, saveOld, password, saveCode)) {
-                        oldPassword=""; password=""; repeated=""; code=""; snackbar.show("修改完成")
+                        oldPassword=""; password=""; repeated=""; code=""; snackbar.show("修改完成", severity = dev.uednd.hydros.data.feedback.FeedbackSeverity.SUCCESS)
                     }
                 }
                 finally { busy=false }

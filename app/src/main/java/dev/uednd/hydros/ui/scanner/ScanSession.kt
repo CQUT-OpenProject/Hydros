@@ -61,6 +61,6 @@ internal class ScanSession {
         val current = mutable.value
         if (generation != current.generation || current.phase != ScanPhase.RESOLVING) return
         mutable.value = current.copy(phase = if (id == null) ScanPhase.ERROR else ScanPhase.DONE,
-            deviceId = id, message = null) // The resolver owns the specific query error notification.
+            deviceId = id, message = if (id == null) "未能获取设备信息，请确认已登录后重新查询" else null)
     }
 }

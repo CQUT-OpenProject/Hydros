@@ -17,7 +17,7 @@ import java.time.LocalDateTime
 
 class NotificationScreensTest {
     @get:Rule val ui = createComposeRule()
-    @Test fun backgroundErrorsAndRepeatedMessagesUseTheGlobalHost() {
+    @Test fun backgroundFailuresDoNotReplaceUserOrDeviceFeedback() {
         val snackbar = HydrosSnackbarState()
         var state by mutableStateOf(HydrosUiState(message = "操作失败"))
         var updates by mutableStateOf(AppUpdateUiState())
@@ -30,31 +30,34 @@ class NotificationScreensTest {
         ui.runOnIdle { assertNull(state.message); state = state.copy(message = "操作失败") }
         ui.onNodeWithText("操作失败").assertIsDisplayed()
         ui.runOnIdle { assertTrue(snackbar.notice.value!!.id > first); state = state.copy(walletError = "后台钱包错误") }
-        ui.onNodeWithText("后台钱包错误").assertIsDisplayed()
+        ui.onNodeWithText("后台钱包错误").assertDoesNotExist()
+        ui.onNodeWithText("操作失败").assertIsDisplayed()
         val device = DeviceUi("test-device", "水表", "宿舍", DeviceCategory.SHOWER)
-        ui.runOnIdle { state = state.copy(session = SessionUi(device, "owner", stage = SessionStage.OPEN_UNCONFIRMED, message = "开启结果待确认")) }
-        ui.onNodeWithText("开启结果待确认").assertIsDisplayed()
+        ui.runOnIdle { state = state.copy(session = SessionUi(device, "owner", stage = SessionStage.OPEN_UNCONFIRMED, recoveryReason = dev.uednd.hydros.ui.state.SessionRecoveryReason.OPEN_UNKNOWN)) }
+        ui.onNodeWithText("开启结果尚未确认", substring = true).assertIsDisplayed()
         ui.runOnIdle { updates = AppUpdateUiState(error = "后台更新错误") }
-        ui.onNodeWithText("后台更新错误").assertIsDisplayed()
+        ui.onNodeWithText("后台更新错误").assertDoesNotExist()
+        ui.onNodeWithText("开启结果尚未确认", substring = true).assertIsDisplayed()
         ui.onNodeWithText("其他页面").assertExists()
     }
-    @Test fun walletErrorIsTransientAndRetryDoesNotRemovePageRecovery() {
+    @Test fun walletFailureAndOldBalanceRemainVisibleUntilSuccessfulRefresh() {
         var retries = 0
-        var state by mutableStateOf(HydrosUiState(walletError = "钱包网络错误"))
+        var state by mutableStateOf(HydrosUiState(walletError = "钱包网络错误", wallet = WalletUi(12_340)))
         ui.setContent { HydrosTheme { HydrosSnackbarProvider { Surface {
             HydrosNotificationEffects(state, AppUpdateUiState(), {}, { retries++ }, {}, {})
             WalletScreen(state, onRefresh = { retries++ }, onBill = {})
         } } } }
         ui.onAllNodesWithText("钱包网络错误").assertCountEquals(1)
         ui.onNodeWithText("钱包信息加载失败").assertDoesNotExist()
-        ui.onNodeWithText("重试").performClick()
+        ui.onNodeWithText("重新刷新").performScrollTo().performClick()
         assertEquals(1, retries)
-        ui.onNodeWithText("钱包网络错误").assertDoesNotExist()
-        ui.onNodeWithText("刷新", substring = false).performClick()
+        ui.onNodeWithText("钱包网络错误").assertExists()
+        ui.onNodeWithText("刷新失败，显示上次结果").assertExists()
+        ui.onNodeWithText("刷新", substring = false).performScrollTo().performClick()
         assertEquals(2, retries)
         ui.runOnIdle { state = state.copy(walletError = null) }
         ui.runOnIdle { state = state.copy(walletError = "钱包网络错误") }
-        ui.onNodeWithText("钱包网络错误").assertIsDisplayed()
+        ui.onNodeWithText("钱包网络错误").performScrollTo().assertIsDisplayed()
     }
     @Test fun walletBillTypeSwitchShowsOnlySelectedKindAndRechargeRowsAreNotClickable() {
         val consume = BillUi("consume-1", "宿舍热水", "宿舍", DeviceCategory.SHOWER, 500L,

@@ -49,7 +49,7 @@ fun VerificationCodeField(
                         try {
                             if (onSend(phone)) {
                                 until = SystemClock.elapsedRealtime() + 60_000
-                                snackbar.show("验证码已发送")
+                                snackbar.show("验证码已发送", severity = dev.uednd.hydros.data.feedback.FeedbackSeverity.SUCCESS)
                             }
                         } finally {
                             sending = false

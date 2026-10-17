@@ -1,5 +1,6 @@
 package dev.uednd.hydros.ui
 
+import dev.uednd.hydros.data.feedback.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import dev.uednd.hydros.ui.components.LocalHydrosSnackbar
@@ -18,13 +19,14 @@ internal fun HydrosNotificationEffects(
     onMonth: (String) -> Unit,
     onCheckUpdates: () -> Unit,
     showUpdateErrors: Boolean = true,
+    onSession: () -> Unit = {},
 ) {
     val snackbar = LocalHydrosSnackbar.current
     LaunchedEffect(state.message) {
-        state.message?.let { onMessageConsumed(); snackbar.show(it, error = true) }
+        state.message?.let { onMessageConsumed(); snackbar.show(it, error = state.messageSeverity == FeedbackSeverity.ERROR, source = state.messageSource, severity = state.messageSeverity,
+            action = if (state.messageAction == RecoveryAction.SESSION) SnackbarAction("返回使用页面", onSession) else null) }
     }
-    SnackbarMessage(state.session?.message, eventKey = state.session?.let { Triple(it.device.id, it.startedAt, it.message) })
-    SnackbarMessage(state.walletError, action = SnackbarAction("重试", onRefresh))
-    SnackbarMessage(state.billsError, eventKey = state.month to state.billsError, action = SnackbarAction("重试") { onMonth(state.month) })
-    SnackbarMessage(updates.error.takeIf { showUpdateErrors }, action = SnackbarAction("重试", onCheckUpdates))
+    SnackbarMessage(state.session?.message, eventKey = state.session?.let { Triple(it.device.id, it.startedAt, it.message) },
+        source = "device", severity = FeedbackSeverity.WARNING, action = SnackbarAction("返回使用页面", onSession))
+    SnackbarMessage(updates.error.takeIf { showUpdateErrors }, action = SnackbarAction("重试", onCheckUpdates), source = "background")
 }

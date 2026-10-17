@@ -57,4 +57,17 @@ class SnackbarStateTest {
         state.unregisterModal(sheet)
         assertTrue(state.modalOwners.value.isEmpty())
     }
+    @Test fun backgroundCannotReplaceUserOrDeviceAndExplicitKeysDeduplicate() {
+        val state = HydrosSnackbarState()
+        state.show("操作失败", source = "device", dedupKey = "close:1")
+        val first = state.notice.value!!.id
+        assertNull(state.show("后台刷新失败", source = "background"))
+        state.show("操作失败", source = "device", dedupKey = "close:1")
+        assertEquals(first, state.notice.value!!.id)
+        state.show("切换成功", severity = dev.uednd.hydros.data.feedback.FeedbackSeverity.SUCCESS)
+        assertFalse(state.notice.value!!.error)
+        state.show("请检查水流", severity = dev.uednd.hydros.data.feedback.FeedbackSeverity.WARNING)
+        assertFalse(state.notice.value!!.error)
+    }
+
 }

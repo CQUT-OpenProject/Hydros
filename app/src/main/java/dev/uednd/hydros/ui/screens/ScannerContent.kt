@@ -42,9 +42,11 @@ import dev.uednd.hydros.ui.components.SnackbarMessage
 import dev.uednd.hydros.ui.components.SnackbarAction
 import dev.uednd.hydros.ui.components.ActionRow
 import dev.uednd.hydros.ui.components.PrimaryAction
+import dev.uednd.hydros.ui.components.InlineState
 import dev.uednd.hydros.ui.components.SecondaryAction
 import dev.uednd.hydros.ui.components.TextAction
 import dev.uednd.hydros.ui.components.rememberHydrosHaptics
+import dev.uednd.hydros.data.feedback.*
 import dev.uednd.hydros.R
 import dev.uednd.hydros.ui.scanner.*
 import kotlinx.coroutines.CancellationException
@@ -102,7 +104,7 @@ fun ScanScreen(onResolve: suspend (String, Int?) -> String?, enabled: Boolean = 
             val token = state.generation
             try { session.resolved(token, resolve(state.mac!!, null)) }
             catch (e: CancellationException) { throw e }
-            catch (_: Exception) { session.fail(token, "设备查询失败，请重新扫描") }
+            catch (error: Exception) { session.fail(token, failureFeedback(error, FailureOperation.SCAN, FailureStage.DEVICE_INFO).text) }
         }
     }
     var navigatedGeneration by remember { mutableStateOf<Long?>(null) }
@@ -176,7 +178,7 @@ internal fun ScanContent(
     val scanning = state.phase == ScanPhase.SCANNING
     val busy = state.phase in setOf(ScanPhase.PICKING, ScanPhase.DECODING, ScanPhase.RESOLVING, ScanPhase.DONE)
     val snackbar = LocalHydrosSnackbar.current
-    SnackbarMessage(state.message, eventKey = state.generation to state.message,
+    SnackbarMessage(state.message.takeIf { state.phase != ScanPhase.ERROR }, eventKey = state.generation to state.message,
         action = if (state.phase == ScanPhase.ERROR) SnackbarAction("重新扫描", onRetry) else null)
     SnackbarMessage(cameraStatus.error, eventKey = state.generation to cameraStatus.error, action = SnackbarAction("重试", onRetry))
     SnackbarMessage(cameraStatus.torchError)
@@ -238,6 +240,7 @@ internal fun ScanContent(
             ScanPhase.DECODING -> StateCard("正在识别图片", "正在查找用水设备二维码", loading = true)
             ScanPhase.RESOLVING, ScanPhase.DONE -> StateCard("正在查询设备", queryProgress ?: "识别成功，正在获取设备信息", loading = true)
             ScanPhase.ERROR -> {
+                InlineState(if (state.mac != null) "设备信息查询未完成" else "识别未完成", state.message ?: "请重试")
                 SecondaryAction(if (state.mac != null) "重新查询" else "重新扫描", onClick = onRetry)
                 if (state.mac != null && onRescan != null) TextAction(label = "重新扫描", onClick = onRescan)
             }

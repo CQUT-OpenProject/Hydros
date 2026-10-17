@@ -74,7 +74,9 @@ fun WalletScreen(state: HydrosUiState, onMonth: (String) -> Unit = {}, onBillTyp
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("钱包余额", style = MaterialTheme.typography.titleMedium)
-                            Text("¥ ${money(state.wallet.totalCents)}", style = MaterialTheme.typography.headlineLarge)
+                            Text(if (state.wallet.totalMilli != null) "¥ ${money(state.wallet.totalCents)}" else if (state.walletLoading) "正在获取余额…" else "余额暂无法获取", style = MaterialTheme.typography.headlineLarge)
+                            if (state.walletLoading && state.wallet.totalMilli != null) Text("正在刷新余额…")
+                            if (state.walletError != null && state.wallet.totalMilli != null) Text("刷新失败，显示上次结果")
                         }
                         TextButton(
                             onClick = { haptics.light(); onRefresh() },
@@ -82,6 +84,7 @@ fun WalletScreen(state: HydrosUiState, onMonth: (String) -> Unit = {}, onBillTyp
                         ) { Text("刷新") }
                     }
                 }
+                state.walletError?.let { InlineState("余额刷新未完成", it, action = "重新刷新", onAction = onRefresh) }
                 Spacer(Modifier.height(20.dp))
             }
             billHistoryList(
@@ -90,6 +93,7 @@ fun WalletScreen(state: HydrosUiState, onMonth: (String) -> Unit = {}, onBillTyp
                 bills = state.bills,
                 loading = state.loadingBills,
                 error = state.billsError != null,
+                errorMessage = state.billsError,
                 onMonth = onMonth,
                 onBillType = { type ->
                     if (type != state.billType) haptics.medium()
@@ -110,6 +114,7 @@ fun MineScreen(
     hasUpdate: Boolean = false,
     onFeedback: () -> Unit = {},
     onDisplay: () -> Unit = {},
+    onRefresh: () -> Unit = {},
 ) {
     PageColumn {
         Section {
@@ -138,6 +143,7 @@ fun MineScreen(
             SubtleDivider()
             InfoRow("学号", state.account.studentId)
         }
+        state.accountError?.let { StateCard("账户资料未更新", it, action = "刷新资料", onAction = onRefresh) }
         Section("个性化") {
             MineRow("反馈设置", icon = R.drawable.ic_vibration, tone = IconTone.PRIMARY, onClick = onFeedback)
             SubtleDivider()
@@ -154,9 +160,11 @@ fun MineScreen(
 }
 
 @Composable
-fun BillDetailScreen(bill: BillUi?, onWallet: () -> Unit) {
+fun BillDetailScreen(bill: BillUi?, onWallet: () -> Unit, loading: Boolean = false, error: String? = null, onRetry: () -> Unit = {}) {
     SnackbarMessage(if (bill == null) "未找到账单，请返回钱包查看其他记录" else null)
     PageColumn {
+        if (loading) InlineState("正在加载账单详情", loading = true)
+        error?.let { StateCard("账单详情未更新", it, action = "重新查询", onAction = onRetry) }
         if (bill == null) SecondaryAction("返回钱包", onClick = onWallet)
         else {
             Column(Modifier.fillMaxWidth().padding(vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -164,7 +172,7 @@ fun BillDetailScreen(bill: BillUi?, onWallet: () -> Unit) {
                     if (bill.recharge) R.drawable.ic_check else R.drawable.ic_receipt,
                     tone = if (bill.recharge) IconTone.PRIMARY else IconTone.SECONDARY
                 )
-                Text(if (bill.recharge) "充值完成" else if(bill.amountMilli == null) "消费金额待查询" else "消费已结算", style = MaterialTheme.typography.titleLarge)
+                Text(if (loading || error != null) "账单详情待核实" else if (bill.recharge) "充值完成" else if(bill.amountMilli == null) "消费金额待查询" else "消费已结算", style = MaterialTheme.typography.titleLarge)
                 Text("${if (bill.recharge) "+" else "−"} ¥${money(bill.amountCents)}", style = MaterialTheme.typography.headlineLarge)
             }
             Section("账单详情") {

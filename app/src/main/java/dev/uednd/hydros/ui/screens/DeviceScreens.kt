@@ -1,5 +1,7 @@
 package dev.uednd.hydros.ui.screens
 
+import dev.uednd.hydros.data.feedback.*
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +25,7 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
     val favorite = device?.id in state.favoriteDeviceIds
     LaunchedEffect(device?.id, favorite) { if (!favorite) editingRemark = false }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val snackbar = LocalHydrosSnackbar.current
     val restriction = when {
         device == null -> "设备不存在，请重新扫描设备二维码"
@@ -88,11 +91,26 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
                 SubtleDivider()
                 InfoRow("预扣金额", "¥ ${money(device.depositCents)}")
             }
+            state.connectionMessage?.takeIf { state.connectingId == device.id && state.connectionStage == ConnectionStage.READY }?.let {
+                Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            state.deviceActionError?.takeIf { state.connectingId == device.id && state.session == null }?.let {
+                StateCard("开启未完成", it, action = "重新连接", onAction = { onConnect(device) })
+            }
             when {
                 state.session != null -> SecondaryAction("返回使用页面", onClick = onSession)
                 state.connectingId == device.id && state.connectionStage == ConnectionStage.CONNECTING -> StateCard("正在连接",
                     state.networkMessage ?: state.connectionMessage ?: "正在核实云端或蓝牙连接…", loading = true)
-                state.connectingId == device.id && state.connectionStage == ConnectionStage.FAILED -> SecondaryAction("重新连接", onClick = { onConnect(device) })
+                state.connectingId == device.id && state.connectionStage == ConnectionStage.FAILED -> {
+                    StateCard("连接未完成", state.connectionMessage ?: "暂时无法连接设备，请重新连接", action = "重新连接", onAction = { onConnect(device) })
+                    if (state.connectionAction in listOf(RecoveryAction.SETTINGS, RecoveryAction.ENABLE_BLUETOOTH)) {
+                        TextAction(if (state.connectionAction == RecoveryAction.ENABLE_BLUETOOTH) "开启蓝牙" else "前往设置", onClick = {
+                            val intent = if (state.connectionAction == RecoveryAction.ENABLE_BLUETOOTH) android.content.Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)
+                                else android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${context.packageName}"))
+                            context.startActivity(intent)
+                        })
+                    }
+                }
                 state.connectingId == device.id && state.connectionStage == ConnectionStage.READY -> {
                     if (device.status == DeviceStatus.BUSY) PrimaryAction("核实并恢复本人订单", enabled=!state.working) { onStart(device) }
                     else HoldActionButton(device.id, enabled = !state.working, working = state.working) { onStart(device) }
@@ -124,7 +142,7 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
                             val before = snackbar.notice.value?.id
                             if (onSaveRemark(device.id, remark)) {
                                 editingRemark = false
-                                snackbar.show("备注已保存")
+                                snackbar.show("备注已保存", severity = FeedbackSeverity.SUCCESS)
                             } else {
                                 remarkError = "保存失败，请重试"
                                 if (snackbar.notice.value?.id == before) snackbar.show(remarkError!!, error = true)
@@ -138,7 +156,7 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
 }
 
 @Composable
-fun SessionScreen(session: SessionUi?, onFinish: () -> Unit, onHome: () -> Unit, remarks: Map<String, String> = emptyMap(), working: Boolean = false) {
+fun SessionScreen(session: SessionUi?, onFinish: () -> Unit, onHome: () -> Unit, remarks: Map<String, String> = emptyMap(), working: Boolean = false, observation: SessionObservation = SessionObservation()) {
     var seconds by remember { mutableLongStateOf(0) }
     LaunchedEffect(session?.startedAt, session?.endedAt) {
         while (session != null) {
@@ -162,7 +180,7 @@ fun SessionScreen(session: SessionUi?, onFinish: () -> Unit, onHome: () -> Unit,
                     Glyph(session.device.category.icon, modifier = Modifier.size(64.dp))
                     Text(if(session.stage == SessionStage.USING) "正在${session.device.category.label}" else session.stage.label, style = MaterialTheme.typography.titleLarge)
                     Text(elapsed(seconds), style = MaterialTheme.typography.headlineLarge)
-                    Text("已用时长", style = MaterialTheme.typography.bodySmall)
+                    Text("使用时长", style = MaterialTheme.typography.bodySmall)
                 }
             }
             Section("当前设备") {
@@ -175,19 +193,22 @@ fun SessionScreen(session: SessionUi?, onFinish: () -> Unit, onHome: () -> Unit,
                 InfoRow("预扣", "¥ ${money(session.device.depositCents)}")
             }
             session.message?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-            if (session.endedAt != null) {
+            if (observation.deviceId == session.device.id && observation.startedAt == session.startedAt) {
+                if (observation.unavailable) {
+                    Text("暂时无法确认设备状态，请检查水流并恢复连接", color = MaterialTheme.colorScheme.error)
+                    Text(observation.lastConfirmedAt?.let { "上次确认：" + java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.CHINA).format(java.util.Date(it)) }
+                        ?: "本次启动后尚未成功核实设备状态")
+                }
+                observation.actionError?.takeIf { it != session.message }?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+            if (session.endedAt != null && !session.deviceUseChanged) {
                 Text("设备关闭已确认，后续操作用于完成结算", style = MaterialTheme.typography.bodySmall)
             }
             val finishing = working || session.stage in listOf(SessionStage.OPENING, SessionStage.STOPPING, SessionStage.SETTLING)
             DangerAction(
-                label = if (!finishing) when (session.stage) {
-                    SessionStage.SETTLEMENT_PENDING -> "重试结算"
-                    SessionStage.WRITEBACK_PENDING -> "重试清除设备记录"
-                    SessionStage.OPEN_UNCONFIRMED -> "核实并结束使用"
-                    else -> "点击以结束使用"
-                } else when (session.stage) {
+                label = if (!finishing) sessionActionLabel(session) else when (session.stage) {
                     SessionStage.OPENING -> "正在开启"
-                    SessionStage.SETTLING, SessionStage.SETTLEMENT_PENDING -> "设备已关闭，正在结算"
+                    SessionStage.SETTLING, SessionStage.SETTLEMENT_PENDING -> if (session.endedAt != null) "设备已关闭，正在结算" else "正在核实结算"
                     SessionStage.WRITEBACK_PENDING -> "正在清除设备记录"
                     SessionStage.OPEN_UNCONFIRMED -> "正在核实"
                     else -> "正在关闭"

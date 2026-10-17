@@ -1,5 +1,6 @@
 package dev.uednd.hydros.ui.state
 
+import dev.uednd.hydros.data.feedback.*
 import dev.uednd.hydros.data.storage.FeedbackSettings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -10,7 +11,6 @@ import dev.uednd.hydros.data.repository.BillHistory
 import dev.uednd.hydros.data.repository.DevicePreparation
 import dev.uednd.hydros.data.repository.NearbyDiscovery
 import dev.uednd.hydros.data.repository.NearbyDiscoveryState
-import dev.uednd.hydros.data.ble.NearbyScanFailure
 import dev.uednd.hydros.data.analytics.*
 import dev.uednd.hydros.ui.state.ControlChannel
 import dev.uednd.hydros.ui.state.DeviceCategory
@@ -26,13 +26,19 @@ data class HydrosUiState(val initializing: Boolean = true, val signedIn: Boolean
     val connectedDeviceIds: List<String> = emptyList(), val favoriteDeviceIds: Set<String> = emptySet(),
     val deviceRemarks: Map<String, String> = emptyMap(),
     val nearby: NearbyDiscoveryState = NearbyDiscoveryState(),
+    val observation: SessionObservation = SessionObservation(),
     val bills: List<BillUi> = emptyList(), val session: SessionUi? = null, val connectingId: String? = null,
     val connectionStage: ConnectionStage = ConnectionStage.IDLE, val theme: ThemeMode = ThemeMode.SYSTEM,
     val feedback: FeedbackSettings = FeedbackSettings(),
     val fontSizeScale: Float = 1f,
     val month: String = YearMonth.now().toString(), val billType: BillType = BillType.CONSUMPTION,
     val loadingBills: Boolean = false,
+    val messageSeverity: FeedbackSeverity = FeedbackSeverity.ERROR, val messageSource: String = "user",
+    val messageAction: RecoveryAction? = null, val connectionAction: RecoveryAction? = null,
     val networkMessage: String? = null, val connectionMessage: String? = null,
+    val walletLoading: Boolean = false, val walletLoaded: Boolean = false, val accountError: String? = null,
+    val detailId: String? = null, val deviceActionError: String? = null,
+    val detailLoading: Boolean = false, val detailError: String? = null,
     val walletError: String? = null, val billsError: String? = null, val message: String? = null, val working: Boolean = false)
 class HydrosViewModel(
     val graph: HydrosDependencies,
@@ -42,12 +48,16 @@ class HydrosViewModel(
     private val refreshJobs = mutableListOf<Job>()
     private val billHistory = BillHistory(graph.wallet, graph.auth.credentials, viewModelScope)
     private var walletGeneration = 0
+    private var detailGeneration = 0
     private val discovery = NearbyDiscovery(graph.nearbyScanner, graph.devices, graph.auth.credentials, viewModelScope)
     private val preparation = DevicePreparation(
         graph.auth, graph.devices, graph.sessions, graph.store, viewModelScope,
         ensureWatch = graph.ensureWatch,
     )
     init {
+        viewModelScope.launch {
+            graph.sessions.observation.collect { value -> mutable.update { it.copy(observation = value) } }
+        }
         viewModelScope.launch {
             billHistory.state.collect { history ->
                 mutable.update { it.copy(month = history.month, billType = history.type,
@@ -64,13 +74,10 @@ class HydrosViewModel(
         }
         viewModelScope.launch {
             var previous = emptyList<DeviceUi>()
-            var previousError: Exception? = null
             var priorCompleted = false
             discovery.state.collect { nearby ->
                 val resolved = nearby.devices.filter { it !in previous }
-                val error = nearby.error?.takeIf { it !== previousError }
                 previous = nearby.devices
-                previousError = nearby.error
                 if (!priorCompleted && nearby.completed) graph.analytics.nearbyScanResult(
                     if (nearby.error == null) ResultCode.SUCCESS else ResultCode.FAILURE,
                     nearby.devices.size, nearby.error?.let(::failureCategory))
@@ -78,7 +85,7 @@ class HydrosViewModel(
                 mutable.update { current -> current.copy(
                     nearby = nearby,
                     devices = current.devices.filterNot { old -> resolved.any { it.id == old.id } } + resolved,
-                    message = error?.let(::friendly) ?: current.message,
+                    message = current.message,
                 ) }
             }
         }
@@ -98,6 +105,7 @@ class HydrosViewModel(
                     refreshJobs.forEach { it.cancel() }; refreshJobs.clear()
                     preparation.cancel()
                     walletGeneration++
+                    detailGeneration++
                     if (authentication.reauthentication != null) {
                         mutable.update { it.copy(signedIn = false, reauthentication = authentication.reauthentication,
                             initializing = false, loadingBills = false,
@@ -115,7 +123,7 @@ class HydrosViewModel(
                         deviceRemarks=saved?.deviceRemarks ?: emptyMap(), session=graph.sessions.session.value) }
                     if(auth != null) { refresh(); if(graph.sessions.session.value != null) graph.ensureWatch() }
                 }
-            } catch(e: CancellationException) { throw e } catch(e: Exception) { mutable.update { it.copy(initializing=false, message=friendly(e)) } }
+            } catch(e: CancellationException) { throw e } catch(e: Exception) { mutable.update { it.copy(initializing=false, message=failureFeedback(e, FailureOperation.RESTORE, FailureStage.STORAGE).text) } }
         }
         viewModelScope.launch {
             var prior: SessionUi? = null
@@ -147,30 +155,23 @@ class HydrosViewModel(
                     current.copy(
                         connectingId = connection.device?.id,
                         connectionStage = connection.stage,
-                        connectionMessage = connection.message,
+                        connectionMessage = connection.error?.let { failureFeedback(it, FailureOperation.DEVICE).text } ?: connection.message,
+                        connectionAction = connection.error?.let { failureFeedback(it, FailureOperation.DEVICE).action },
                         devices = devices,
                         connectedDeviceIds = if (ready == null) current.connectedDeviceIds else connection.recentDeviceIds,
-                        message = connection.error?.let(::friendly)
-                            ?: connection.message?.takeIf { connection.stage == ConnectionStage.READY } ?: current.message,
+                        message = current.message,
                     )
                 }
             }
         }
     }
-    private fun friendly(error: Exception) = when(error) {
-        is NearbyScanFailure -> error.message
-        is ApiFailure -> error.message
-        is NetworkFailure -> error.message
-        is java.io.IOException -> "网络连接失败，请检查网络后重试"
-        is SecurityException -> "请允许蓝牙权限后重试"
-        else -> "操作未完成，请重试"
-    }
+    private fun friendly(error: Exception) = failureFeedback(error, FailureOperation.BILLS).text
     suspend fun acknowledgeReauthentication(id: Long) {
         graph.auth.acknowledgeReauthentication(id)
         // Restoring the device can wait on an ongoing close operation. Consume the UI notice now.
         mutable.update { if (it.reauthentication?.id == id) it.copy(reauthentication = null) else it }
     }
-    fun dismissMessage() { mutable.update { it.copy(message=null) } }
+    fun dismissMessage() { mutable.update { it.copy(message=null, messageSeverity=FeedbackSeverity.ERROR, messageSource="user", messageAction=null) } }
     fun clearAllData(clear: () -> Boolean): Boolean {
         if (state.value.session != null || graph.sessions.session.value != null) {
             mutable.update { it.copy(message = "请先结束当前设备会话，再清除所有数据。") }
@@ -186,22 +187,29 @@ class HydrosViewModel(
         if (!requested) mutable.update { it.copy(message = "清除失败，请重试") }
         return requested
     }
-    suspend fun action(allowRecovery: Boolean = false, block: suspend () -> Unit): Boolean {
+    suspend fun action(allowRecovery: Boolean = false, operation: FailureOperation = FailureOperation.SETTINGS, block: suspend () -> Unit): Boolean {
         if(mutable.value.working || (!allowRecovery && state.value.reauthentication != null)) return false
         val owner = graph.auth.credentials.value
-        mutable.update { it.copy(working=true, message=null) }
+        mutable.update { it.copy(working=true, message=null,
+            deviceActionError=if (operation == FailureOperation.START) null else it.deviceActionError) }
         return try { block(); true } catch(e: CancellationException) { throw e }
         catch(e: Exception) {
             if ((e !is ApiFailure || !e.expired) && state.value.reauthentication == null && graph.auth.credentials.value == owner) {
-                mutable.update { it.copy(message=friendly(e)) }
+                val deviceAction = operation in listOf(FailureOperation.START, FailureOperation.FINISH)
+                if (operation == FailureOperation.FINISH) graph.sessions.reportActionFailure(e)
+                val feedback = if (deviceAction) graph.sessions.session.value?.let(::sessionFeedback) ?: failureFeedback(e, operation)
+                    else failureFeedback(e, operation)
+                mutable.update { it.copy(message=feedback.text, messageSeverity=feedback.severity,
+                    messageSource=if (deviceAction) "device" else "user", messageAction=feedback.action,
+                    deviceActionError=if (operation == FailureOperation.START && graph.sessions.session.value == null) feedback.text else it.deviceActionError) }
             }
             false
         }
         finally { mutable.update { it.copy(working=false) } }
     }
-    suspend fun login(phone: String, secret: String, sms: Boolean) = action { graph.auth.login(phone, secret, sms) }
-    suspend fun sendCode(phone: String, type: Int) = action { graph.auth.sendCode(phone, type) }
-    suspend fun saveAccount(form: dev.uednd.hydros.ui.screens.AccountForm, phone: String, old: String, password: String, code: String) = action {
+    suspend fun login(phone: String, secret: String, sms: Boolean) = action(operation = FailureOperation.LOGIN) { graph.auth.login(phone, secret, sms) }
+    suspend fun sendCode(phone: String, type: Int) = action(operation = FailureOperation.CODE) { graph.auth.sendCode(phone, type) }
+    suspend fun saveAccount(form: dev.uednd.hydros.ui.screens.AccountForm, phone: String, old: String, password: String, code: String) = action(operation = FailureOperation.ACCOUNT) {
         if(state.value.session != null) throw ApiFailure(null, "请先结束当前设备使用，再修改账户")
         when(form) {
             dev.uednd.hydros.ui.screens.AccountForm.PHONE -> graph.auth.savePhone(phone, code)
@@ -248,7 +256,7 @@ class HydrosViewModel(
         } }
     }
     fun toggleFavorite(deviceId: String) {
-        graph.scope.launch { action {
+        graph.scope.launch { action(operation = FailureOperation.FAVORITE) {
             val auth = graph.auth.requireCredentials()
             val saved = graph.store.updateAccount(auth.key) {
                 when {
@@ -260,7 +268,7 @@ class HydrosViewModel(
             if(graph.auth.credentials.value == auth) mutable.update { it.copy(favoriteDeviceIds=saved.favorites, deviceRemarks=saved.deviceRemarks) }
         } }
     }
-    suspend fun saveDeviceRemark(deviceId: String, value: String): Boolean = action {
+    suspend fun saveDeviceRemark(deviceId: String, value: String): Boolean = action(operation = FailureOperation.REMARK) {
         val auth = graph.auth.requireCredentials()
         if (state.value.devices.none { it.id == deviceId }) throw ApiFailure(null, "设备不存在，请重新扫描")
         if (value.length > DEVICE_REMARK_MAX_LENGTH) throw ApiFailure(null, "设备备注最多 $DEVICE_REMARK_MAX_LENGTH 字")
@@ -280,12 +288,17 @@ class HydrosViewModel(
             mutable.update { it.copy(devices=it.devices.filterNot { d -> d.id == device.id } + device) }
             graph.analytics.qrScanResult(ResultCode.SUCCESS)
             device.id
-        } catch(e: CancellationException) { throw e } catch(e: Exception) { graph.analytics.qrScanResult(ResultCode.FAILURE, failureCategory(e)); if (graph.auth.credentials.value == auth && (e !is ApiFailure || !e.expired)) mutable.update { it.copy(message=friendly(e)) }; null }
+        } catch(e: CancellationException) { throw e } catch(e: Exception) {
+            graph.analytics.qrScanResult(ResultCode.FAILURE, failureCategory(e))
+            throw e
+        }
     }
     fun discoverNearby() = discovery.start()
     fun stopDiscovery() = discovery.stop()
     fun connect(device: DeviceUi) {
         discovery.stop()
+        if (state.value.deviceActionError != null) preparation.cancel()
+        mutable.update { it.copy(deviceActionError=null) }
         preparation.prepare(device)
     }
     fun cancelConnection() {
@@ -294,7 +307,7 @@ class HydrosViewModel(
     fun start(device: DeviceUi) {
         if (state.value.working || state.value.session != null) return
         graph.scope.launch {
-            val completed = action {
+            val completed = action(operation = FailureOperation.START) {
                 preparation.startSession(device.id)
             }
             val current = graph.sessions.session.value
@@ -309,7 +322,7 @@ class HydrosViewModel(
     }
     fun finish() { if(!state.value.working) graph.scope.launch {
         val session = graph.sessions.session.value ?: return@launch
-        val completed = action(allowRecovery = true) { graph.ensureWatch(); graph.sessions.finish(graph.auth.credentials.value) }
+        val completed = action(allowRecovery = true, operation = FailureOperation.FINISH) { graph.ensureWatch(); graph.sessions.finish(graph.auth.credentials.value) }
         val current = graph.sessions.session.value
         val result = when {
             current == null && completed -> ResultCode.SUCCESS
@@ -326,18 +339,18 @@ class HydrosViewModel(
         refreshJobs += viewModelScope.launch {
             try {
                 val account=graph.account.load(auth)
-                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(account=account) }
+                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(account=account, accountError=null) }
             } catch(e: CancellationException) { throw e } catch(e: Exception) {
-                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(message="账户资料暂无法获取，请刷新重试") }
+                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(accountError=failureFeedback(e, FailureOperation.PROFILE).text) }
             }
         }
         refreshJobs += viewModelScope.launch {
-            mutable.update { it.copy(walletError=null) }
+            mutable.update { it.copy(walletError=null, walletLoading=true) }
             try {
                 val wallet=graph.wallet.load(auth)
-                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(wallet=wallet) }
+                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(wallet=wallet, walletLoaded=true, walletLoading=false, walletError=null) }
             } catch(e: CancellationException) { throw e } catch(e: Exception) {
-                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(walletError=friendly(e)) }
+                if(graph.auth.credentials.value==auth && generation==walletGeneration) mutable.update { it.copy(walletError=failureFeedback(e, FailureOperation.WALLET).text, walletLoading=false) }
             }
         }
         billHistory.refresh()
@@ -345,7 +358,18 @@ class HydrosViewModel(
     fun loadMonth(month: String) = billHistory.selectMonth(month)
     fun selectBillType(type: BillType) = billHistory.selectType(type)
     fun loadDetail(id: String) {
-        viewModelScope.launch { action { billHistory.loadDetail(id) } }
+        val owner = graph.auth.credentials.value
+        val generation = ++detailGeneration
+        viewModelScope.launch {
+            mutable.update { it.copy(detailLoading=true, detailError=null, detailId=id) }
+            try { billHistory.loadDetail(id) }
+            catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                if (owner == graph.auth.credentials.value && generation == detailGeneration) mutable.update { it.copy(detailError=failureFeedback(error, FailureOperation.DETAIL).text) }
+            } finally {
+                if (owner == graph.auth.credentials.value && generation == detailGeneration) mutable.update { it.copy(detailLoading=false) }
+            }
+        }
     }
 }
 private fun DeviceCategory.toAnalyticsType() = when (this) {

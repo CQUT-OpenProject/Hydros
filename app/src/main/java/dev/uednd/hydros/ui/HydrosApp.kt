@@ -123,7 +123,7 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
     val bluetoothPermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
         permissionTarget?.let { target ->
             if (granted[Manifest.permission.BLUETOOTH_SCAN] == true && granted[Manifest.permission.BLUETOOTH_CONNECT] == true) model.connect(target)
-            else snackbar.show("请允许蓝牙权限后重试", error = true)
+            else snackbar.show("请允许附近设备权限后重新连接；若无法再次授权，请前往设置", action = dev.uednd.hydros.ui.components.SnackbarAction("前往设置") { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${context.packageName}"))) }, error = true)
         }
         permissionTarget=null
     }
@@ -252,7 +252,7 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
         }
         // Each destination owns its chrome so both pages retain their own bars during a back gesture.
         HydrosSnackbarProvider(snackbar, bottomPadding = if (destinations.any { it.route == route }) mainBarHeight else 0.dp) {
-            HydrosNotificationEffects(state, updates, model::dismissMessage, model::refresh, model::loadMonth, appInfo::checkForUpdates, showUpdateErrors = route != "about/update")
+            HydrosNotificationEffects(state, updates, model::dismissMessage, model::refresh, model::loadMonth, appInfo::checkForUpdates, showUpdateErrors = route != "about/update", onSession = { openPage("session") })
             HoldActionHost {
                 Box(Modifier.fillMaxSize()) {
                     NavHost(
@@ -306,7 +306,7 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                         composable("mine") {
                             HydrosPage("我的", bottomBar = { HydrosBottomBar("mine", ::main, onScan = { openPage("scan") }, onHeight = updateBarHeight) }) {
                                 primaryStates.SaveableStateProvider("mine") {
-                                    MineScreen(state, onManageAccount = { openPage("account") },
+                                    MineScreen(state, onRefresh = model::refresh, onManageAccount = { openPage("account") },
                                         onAppearance = { openPage("appearance") },
                                         onFeedback = { openPage("feedback") },
                                         onDisplay = { openPage("display") },
@@ -428,7 +428,7 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                         }
                         composable("session") {
                             HydrosPage("设备使用", onBack = { back() }) {
-                                SessionScreen(state.session, onFinish = model::finish, onHome = { main("home") }, remarks = state.deviceRemarks, working = state.working)
+                                SessionScreen(state.session, onFinish = model::finish, onHome = { main("home") }, remarks = state.deviceRemarks, working = state.working, observation = state.observation)
                             }
                         }
                         composable("bill/{id}") { backStack ->
@@ -436,7 +436,8 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                             LaunchedEffect(backStack.id) { billId?.let(model::loadDetail) }
                             HydrosPage("账单详情", onBack = { back() }) {
                                 val currentBill = state.bills.find { it.id == billId } ?: remember(billId) { state.bills.find { it.id == billId } }
-                                BillDetailScreen(currentBill, onWallet = { if (state.reauthentication == null) nav.popBackStack("home", inclusive = false) })
+                                BillDetailScreen(currentBill, onWallet = { if (state.reauthentication == null) nav.popBackStack("home", inclusive = false) },
+                                    loading = state.detailLoading && state.detailId == billId, error = state.detailError.takeIf { state.detailId == billId }, onRetry = { billId?.let(model::loadDetail) })
                             }
                         }
                         composable("account/{form}") { backStack ->

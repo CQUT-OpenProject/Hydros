@@ -50,7 +50,7 @@ class BillHistoryViewModelTest {
             model.loadMonth("2025-02")
             runCurrent()
             assertEquals("2025-02", model.state.value.month)
-            assertEquals("网络连接失败，请检查网络后重试", model.state.value.billsError)
+            assertEquals("加载账单失败，请检查网络后重试", model.state.value.billsError)
             assertFalse(model.state.value.loadingBills)
             auth.logout()
             runCurrent()
