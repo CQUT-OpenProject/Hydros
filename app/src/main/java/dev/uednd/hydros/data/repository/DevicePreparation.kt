@@ -68,7 +68,7 @@ class DevicePreparation(
         val next = Attempt(credentials)
         attempt = next
         mutable.value = DevicePreparationState(device, ConnectionStage.CONNECTING,
-            message = if (forceBle) "设备离线，正在尝试蓝牙连接…" else null)
+            message = if (forceBle) "设备离线，正在尝试蓝牙连接；暂时中断时会自动重试…" else "正在获取设备信息并连接，暂时失败时会自动重试…")
 
         job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {

@@ -120,12 +120,18 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
     val appData = (context.applicationContext as HydrosApplication).appData
     val snackbar = remember { HydrosSnackbarState() }
     var permissionTarget by remember { mutableStateOf<DeviceUi?>(null) }
-    val bluetoothPermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+    fun bluetoothGranted() = listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT).all {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    }
+    val bluetoothPermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
         permissionTarget?.let { target ->
-            if (granted[Manifest.permission.BLUETOOTH_SCAN] == true && granted[Manifest.permission.BLUETOOTH_CONNECT] == true) model.connect(target)
-            else snackbar.show("请允许附近设备权限后重新连接；若无法再次授权，请前往设置", action = dev.uednd.hydros.ui.components.SnackbarAction("前往设置") { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${context.packageName}"))) }, error = true)
+            if (bluetoothGranted()) {
+                permissionTarget = null
+                model.connect(target)
+            } else snackbar.show("请允许附近设备权限，授权后将继续连接", action = dev.uednd.hydros.ui.components.SnackbarAction("前往设置") {
+                context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${context.packageName}")))
+            }, error = true)
         }
-        permissionTarget=null
     }
     fun requestConnect(device: DeviceUi) {
         if (!state.signedIn || state.reauthentication != null) return
@@ -196,6 +202,26 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
     val entry by nav.currentBackStackEntryAsState()
     val navigationRoute = entry?.destination?.route ?: "home"
     val route = if (navigationRoute == "home") destinations[pageState.currentPage].route else navigationRoute
+    LaunchedEffect(entry?.id, state.signedIn) {
+        if (!state.signedIn || entry?.destination?.route != "device/{id}" ||
+            permissionTarget?.id != entry?.arguments?.getString("id")) permissionTarget = null
+    }
+    DisposableEffect(lifecycleOwner, nav, model) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val current = nav.currentBackStackEntry
+                val deviceId = current?.arguments?.getString("id")
+                model.recoverQueries(deviceId.takeIf { current?.destination?.route == "bill/{id}" })
+                if (bluetoothGranted() && current?.destination?.route == "device/{id}" && deviceId != null) {
+                    val pending = permissionTarget?.takeIf { it.id == deviceId }
+                    if (pending != null) { permissionTarget = null; model.connect(pending) }
+                    else model.recoverConnection(deviceId)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     BackHandler(navigationRoute == "home" && pageState.currentPage == 1 && state.reauthentication == null) {
         navigationScope.launch {
             if (state.feedback.reduceMotionEnabled) pageState.scrollToPage(0) else pageState.animateScrollToPage(0)

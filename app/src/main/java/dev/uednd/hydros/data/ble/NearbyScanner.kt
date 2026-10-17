@@ -1,5 +1,6 @@
 package dev.uednd.hydros.data.ble
 
+import dev.uednd.hydros.data.feedback.*
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
@@ -31,7 +32,8 @@ class AndroidNearbyScanner(context: Context) : NearbyScanner {
     @SuppressLint("MissingPermission")
     override fun advertisements(): Flow<NearbyAdvertisement> = callbackFlow {
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
-        if (adapter?.isEnabled != true) throw NearbyScanFailure("蓝牙未开启，请开启后重新扫描")
+        if (adapter == null) throw AppFailure(FailureOperation.SCAN, FailureStage.BLE_CONNECT, FailureReason.UNSUPPORTED)
+        if (!adapter.isEnabled) throw AppFailure(FailureOperation.SCAN, FailureStage.BLE_CONNECT, FailureReason.BLUETOOTH_OFF)
         val scanner = adapter.bluetoothLeScanner ?: throw NearbyScanFailure("蓝牙扫描不可用，请重试")
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {

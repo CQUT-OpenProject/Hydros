@@ -301,6 +301,19 @@ class HydrosViewModel(
         mutable.update { it.copy(deviceActionError=null) }
         preparation.prepare(device)
     }
+    /** Resume the user's existing connection intent after returning from settings or a network interruption. */
+    fun recoverConnection(deviceId: String) {
+        if (!state.value.signedIn || state.value.reauthentication != null || state.value.session != null || state.value.working) return
+        val pending = preparation.state.value
+        val device = pending.device ?: return
+        if (pending.stage != ConnectionStage.FAILED || device.id != deviceId) return
+        val error = pending.error ?: return
+        if (generateSequence<Throwable>(error) { it.cause }.any { it is javax.net.ssl.SSLException || it is java.net.ProtocolException }) return
+        val failure = classifyFailure(error, FailureOperation.DEVICE, FailureStage.NETWORK)
+        if (failure.reason !in setOf(FailureReason.NETWORK, FailureReason.TIMEOUT, FailureReason.DISCONNECTED,
+                FailureReason.BLUETOOTH_OFF, FailureReason.PERMISSION)) return
+        connect(device)
+    }
     fun cancelConnection() {
         preparation.cancel()
     }
@@ -332,6 +345,15 @@ class HydrosViewModel(
         graph.analytics.sessionFinishResult(result, session.device.channel.toAnalyticsChannel(), session.device.category.toAnalyticsType(),
             if (completed) null else FailureCategory.UNKNOWN)
     } }
+    /** A foreground return may complete an interrupted read, but never replays a user command. */
+    fun recoverQueries(visibleBillId: String? = null) {
+        val current = state.value
+        if (!current.signedIn || current.reauthentication != null || current.working) return
+        if ((current.accountError != null || current.walletError != null || current.billsError != null) &&
+            !current.walletLoading && !current.loadingBills && refreshJobs.none { it.isActive }) refresh()
+        if (visibleBillId != null && current.detailId == visibleBillId && current.detailError != null && !current.detailLoading)
+            loadDetail(visibleBillId)
+    }
     fun refresh() {
         val auth = graph.auth.credentials.value ?: return
         refreshJobs.removeAll { it.isCompleted }

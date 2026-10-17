@@ -35,11 +35,13 @@ fun BlePort.isConnectedTo(mac: String): Boolean = ready &&
 /** Retry transport setup only; never replay rate, close, upload or writeback commands. */
 suspend fun BlePort.connectWithRetry(mac: String): BleConnectResult =
     kotlinx.coroutines.withTimeoutOrNull(BleController.CONNECT_TIMEOUT_MS) {
-        val first = connect(mac)
+        suspend fun attempt(): BleConnectResult = kotlinx.coroutines.withTimeoutOrNull(7_000) { connect(mac) }
+            ?: BleConnectResult.Failed(FailureReason.TIMEOUT).also { disconnect() }
+        val first = attempt()
         if (first !is BleConnectResult.Failed || !first.retryable) return@withTimeoutOrNull first
         disconnect()
         kotlinx.coroutines.delay(350)
-        connect(mac)
+        attempt()
     } ?: BleConnectResult.Failed(FailureReason.TIMEOUT, retryable = false).also { disconnect() }
 
 /** A complete command is serialized by the repository; the failure belongs to its last result. */

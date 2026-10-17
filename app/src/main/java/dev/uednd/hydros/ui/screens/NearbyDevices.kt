@@ -36,17 +36,28 @@ fun NearbyDevices(
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val stop by rememberUpdatedState(onStop)
+    val scan by rememberUpdatedState(onScan)
+    var pendingScan by remember { mutableStateOf(false) }
     val wanted = listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
     fun granted(permission: String) = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
     var permissions by remember { mutableStateOf(wanted.associateWith(::granted)) }
     val snackbar = LocalHydrosSnackbar.current
     val request = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         permissions = wanted.associateWith(::granted)
-        if (permissions.values.any { !it }) snackbar.show("请允许附近设备权限后重试", error = true)
+        if (permissions.values.all { it } && pendingScan) {
+            pendingScan = false
+            scan()
+        } else if (permissions.values.any { !it }) snackbar.show("请允许附近设备权限，授权后将继续扫描", error = true)
     }
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) permissions = wanted.associateWith(::granted)
+            if (event == Lifecycle.Event.ON_RESUME) {
+                permissions = wanted.associateWith(::granted)
+                if (pendingScan && permissions.values.all { it }) {
+                    pendingScan = false
+                    scan()
+                }
+            }
             if (event == Lifecycle.Event.ON_STOP) stop()
         }
         owner.lifecycle.addObserver(observer)
@@ -57,14 +68,17 @@ fun NearbyDevices(
     }
     fun startScan() {
         permissions = wanted.associateWith(::granted)
-        if (permissions.values.any { !it }) request.launch(wanted.toTypedArray()) else onScan()
+        if (permissions.values.any { !it }) {
+            pendingScan = true
+            request.launch(wanted.toTypedArray())
+        } else { pendingScan = false; scan() }
     }
 
     Section("附近设备") {
         if (permissions.values.any { !it }) {
             InlineState("需要附近设备权限", "请允许附近设备权限后扫描；若系统不再弹出授权窗口，请前往设置开启。")
-            SecondaryAction("允许蓝牙", onClick = { request.launch(wanted.toTypedArray()) }, modifier = Modifier.padding(16.dp))
-            TextAction("前往设置", onClick = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri())) })
+            SecondaryAction("允许蓝牙", onClick = { startScan() }, modifier = Modifier.padding(16.dp))
+            TextAction("前往设置", onClick = { pendingScan = true; context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri())) })
         } else {
             if (!state.searching && state.error != null) {
                 val text = when {
@@ -74,6 +88,12 @@ fun NearbyDevices(
                     else -> "已发现设备，但设备信息查询失败。" + failureFeedback(state.error, FailureOperation.SCAN).text
                 }
                 InlineState("扫描未全部完成", text)
+            }
+            if (!state.searching && (state.error as? AppFailure)?.reason == FailureReason.BLUETOOTH_OFF) {
+                TextAction("开启蓝牙并继续扫描", onClick = {
+                    pendingScan = true
+                    context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                })
             }
             val found = state.devices.map { it.id }.toSet()
             val nearby = devices.filter { it.id in found }

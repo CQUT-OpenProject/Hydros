@@ -25,18 +25,18 @@ fun sessionFeedback(value: SessionUi): UserFeedback? {
     val reason = value.recoveryReason
     val text = when {
         value.deviceUseChanged -> "设备已有新的使用，本次只核实原订单结算，请勿操作其他人的设备"
-        value.stage == SessionStage.OPEN_UNCONFIRMED -> "开启结果尚未确认，请检查是否出水，并在此核实；请勿重复开启"
+        value.stage == SessionStage.OPEN_UNCONFIRMED -> "开启结果尚未确认，请检查是否出水；应用正在自动核实，请勿重复开启"
         value.stage == SessionStage.CLOSE_UNCONFIRMED -> "设备关闭尚未确认，请检查水流并重试关闭"
-        value.uploaded -> "消费已记账，设备记录尚未清除，请靠近设备完成清除"
+        value.uploaded -> "消费已记账，设备记录会自动重试清除；请保持靠近并开启蓝牙"
         value.device.channel == ControlChannel.BLE && !value.rateAttempted && value.stage == SessionStage.SETTLEMENT_PENDING ->
             if (reason == SessionRecoveryReason.MISSING_ORDER) "设备未开启，订单恢复信息不完整，请联系服务商核实；请勿重复开启"
             else "设备未开启，订单取消结果待确认，请继续处理；请勿重复开启"
         reason == SessionRecoveryReason.MISSING_ORDER -> "原订单信息不完整，暂时无法核实结算，请联系服务商处理"
         reason == SessionRecoveryReason.LOGIN_REQUIRED -> if (value.endedAt != null) "设备已关闭，请登录原账户完成结算" else "请登录原账户核实设备状态并继续处理"
         value.endedAt != null && value.stage in listOf(SessionStage.SETTLING, SessionStage.SETTLEMENT_PENDING, SessionStage.WRITEBACK_PENDING) ->
-            "设备已关闭，结算尚未完成，请保持网络连接并继续结算"
-        value.stage == SessionStage.SETTLEMENT_PENDING -> "设备状态或结算结果仍待核实，请继续处理；请勿重复开启"
-        value.stage == SessionStage.WRITEBACK_PENDING -> "设备记录待处理，请靠近设备继续核实"
+            "设备已关闭，应用会自动核实结算，请保持网络连接"
+        value.stage == SessionStage.SETTLEMENT_PENDING -> "应用正在自动核实设备状态和结算结果；请勿重复开启"
+        value.stage == SessionStage.WRITEBACK_PENDING -> "设备记录待处理，应用会自动重试；请保持靠近并开启蓝牙"
         reason != null -> "暂时无法核实设备状态，请检查水流并重试"
         else -> return null
     }
