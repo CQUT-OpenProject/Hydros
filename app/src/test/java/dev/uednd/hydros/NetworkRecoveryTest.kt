@@ -1,6 +1,9 @@
 package dev.uednd.hydros
 
 import dev.uednd.hydros.data.network.*
+import dev.uednd.hydros.data.feedback.AppFailure
+import dev.uednd.hydros.data.feedback.FailureReason
+import dev.uednd.hydros.data.feedback.FailureStage
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.*
 import kotlinx.serialization.json.JsonElement
@@ -65,6 +68,7 @@ class NetworkRecoveryTest {
             val paths = if (post) listOf("order/tcpDevice/downRate/rateOrder", "order/downRate/bluetooth/rateOrder",
                 "order/upload/bluetooth/data", "order/tcpDevice/closeOrder") else listOf("user/verification/code/get")
             for (path in paths) assertTrue(runCatching { if (post) transport.post(path) else transport.get(path) }.isFailure)
+            assertEquals(paths.size, default.calls) // Side effects are never replayed.
             assertEquals(0, access.acquisitions)
         }
         val default = Api().apply { script = { throw SSLHandshakeException("certificate") } }
@@ -74,7 +78,11 @@ class NetworkRecoveryTest {
         default.script = { Response.success(response(code = 306)) }
         assertEquals(306, transport.get("device/info/mac").errorCode)
         default.script = { Response.error(503, "".toResponseBody()) }
-        assertEquals(503, (runCatching { transport.get("device/info/mac") }.exceptionOrNull()?.cause as ApiFailure).code)
+        val httpFailure = runCatching { transport.get("device/info/mac") }.exceptionOrNull() as AppFailure
+        assertEquals(FailureStage.RESPONSE, httpFailure.stage)
+        assertEquals(FailureReason.REJECTED, httpFailure.reason)
+        assertEquals(503, (httpFailure.cause as ApiFailure).code)
+        assertEquals(5, default.calls) // TLS once, business rejection once, HTTP 503 at most three times.
         assertEquals(0, access.acquisitions)
     }
 
@@ -128,13 +136,20 @@ class NetworkRecoveryTest {
         val access = Access().apply { acquire = { throw NetworkFailure("移动网络不可用") } }
         val recovery = NetworkRecovery(access, now = { testScheduler.currentTime })
         val transport = transport(default, recovery)
-        assertTrue(runCatching { transport.get("device/info/mac") }.exceptionOrNull()?.cause is NetworkFailure)
+        val unavailable = runCatching { transport.get("device/info/mac") }.exceptionOrNull() as AppFailure
+        assertEquals(FailureReason.NETWORK, unavailable.reason)
+        assertTrue(unavailable.cause is ConnectException)
+        assertEquals(3, default.calls)
+        assertEquals(2, access.acquisitions)
+        assertEquals(2_100L, testScheduler.currentTime)
         assertEquals(0, recovery.cellularRequests.value)
         access.acquire = {}
         access.api.script = { awaitCancellation() }
-        assertTrue(runCatching { transport.get("device/info/mac") }.exceptionOrNull()?.cause is NetworkFailure)
-        assertEquals(5_000L, testScheduler.currentTime)
-        assertEquals(2, default.calls)
+        val failure = runCatching { transport.get("device/info/mac") }.exceptionOrNull() as AppFailure
+        assertEquals(FailureReason.NETWORK, failure.reason)
+        assertEquals(8_500L, testScheduler.currentTime)
+        assertEquals(5, default.calls)
+        assertEquals(3, access.acquisitions)
         assertEquals(1, access.api.calls)
         assertEquals(1, access.releases)
         assertEquals(0, recovery.cellularRequests.value)

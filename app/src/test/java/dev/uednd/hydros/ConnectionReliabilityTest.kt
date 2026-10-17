@@ -170,7 +170,7 @@ class ConnectionReliabilityTest {
         assertEquals(0, base.rates + base.closes + base.backs)
     }
 
-    @Test fun retriesShareOneTotalConnectionDeadline() = runTest {
+    @Test fun eachAttemptIsBoundedWithinTotalConnectionDeadline() = runTest {
         var attempts = 0
         var disconnected = false
         val ble = object : BlePort by ScriptBle() {
@@ -182,9 +182,9 @@ class ConnectionReliabilityTest {
             override fun disconnect() { disconnected = true }
         }
         val result = ble.connectWithRetry(device.connectMac)
-        assertTrue(result is BleConnectResult.Failed && !result.retryable)
+        assertTrue(result is BleConnectResult.Failed && result.reason == dev.uednd.hydros.data.feedback.FailureReason.TIMEOUT)
         assertEquals(2, attempts)
-        assertEquals(15_000L, testScheduler.currentTime)
+        assertEquals(14_350L, testScheduler.currentTime)
         assertTrue(disconnected)
     }
 

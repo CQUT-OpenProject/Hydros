@@ -64,6 +64,8 @@ class HttpCampusTransport(private val api: CampusApi, private val isCurrent: (Cr
         } catch (error: Exception) {
             val http = ((error as? ApiFailure) ?: (error.cause as? ApiFailure))?.code?.let(::httpClass) ?: HttpClass.UNKNOWN
             onDiagnostic(operationFor(path), failureCategory(error), http, RecoveryResult.FAILED)
+            if (error is QueryHttpFailure)
+                throw AppFailure(feedbackOperationFor(path), FailureStage.RESPONSE, FailureReason.REJECTED, error)
             if (error is java.io.IOException || error is kotlinx.serialization.SerializationException)
                 throw classifyFailure(error, feedbackOperationFor(path), FailureStage.NETWORK)
             throw error

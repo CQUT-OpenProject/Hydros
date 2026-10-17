@@ -4,15 +4,17 @@ import dev.uednd.hydros.data.analytics.NetworkOperation
 import dev.uednd.hydros.data.network.*
 import dev.uednd.hydros.data.repository.*
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.OkHttpClient
 import org.junit.Assert.*
 import org.junit.Test
 
+// MockWebServer uses real sockets; virtual time can expire a query before its callback runs.
 class HttpTransportTest {
     private val auth=Credentials("test-token","1","2","3","13800138000")
-    @Test fun diagnosticsDistinguishAccountChangesFromLoginAndVerification() = runTest {
+    @Test fun diagnosticsDistinguishAccountChangesFromLoginAndVerification() = runBlocking {
         val server = MockWebServer(); server.start()
         try {
             val paths = listOf("user/phone/update", "user/password/update", "user/password/forget",
@@ -26,7 +28,7 @@ class HttpTransportTest {
                 List(2) { NetworkOperation.LOGIN }, operations)
         } finally { server.close() }
     }
-    @Test fun getAndPostCarryAuthAndSmsKeepsTargetSeparate()=runTest {
+    @Test fun getAndPostCarryAuthAndSmsKeepsTargetSeparate()=runBlocking {
         val server=MockWebServer(); server.start()
         try {
             repeat(3) { server.enqueue(MockResponse.Builder().body("""{"success":true,"data":null}""").build()) }
@@ -45,7 +47,7 @@ class HttpTransportTest {
             assertEquals("13900139000",sms.url.queryParameter("telephone")); assertEquals(auth.phone,sms.url.queryParameter("telPhone"))
         } finally { server.close() }
     }
-    @Test fun authenticationFailuresOnlyExpireProtectedRequests()=runTest {
+    @Test fun authenticationFailuresOnlyExpireProtectedRequests()=runBlocking {
         val server=MockWebServer(); server.start()
         try {
             server.enqueue(MockResponse.Builder().code(401).body("{}").build())
@@ -59,7 +61,7 @@ class HttpTransportTest {
             assertTrue(runCatching { transport.get("account/info",auth=auth) }.isFailure); assertEquals(2,expirations)
         } finally { server.close() }
     }
-    @Test fun ordinaryFailuresDoNotExpireAndInvalidatedRequestsNeverLeaveTransport() = runTest {
+    @Test fun ordinaryFailuresDoNotExpireAndInvalidatedRequestsNeverLeaveTransport() = runBlocking {
         val server = MockWebServer(); server.start()
         try {
             server.enqueue(MockResponse.Builder().code(500).body("{}").build())
@@ -76,7 +78,7 @@ class HttpTransportTest {
         } finally { server.close() }
     }
 
-    @Test fun forbiddenOnlyExpiresAuthenticatedRequests() = runTest {
+    @Test fun forbiddenOnlyExpiresAuthenticatedRequests() = runBlocking {
         val server = MockWebServer(); server.start()
         try {
             repeat(2) { server.enqueue(MockResponse.Builder().code(403).body("{}").build()) }
