@@ -1,5 +1,6 @@
 package dev.uednd.hydros.ui.state
 
+import dev.uednd.hydros.data.feedback.*
 import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -33,7 +34,7 @@ data class ReleaseHistoryUiState(
 
 class AppInfoViewModel(
     private val source: AppUpdateSource = GitHubAppUpdates(),
-    private val installer: AndroidAppInstaller? = null,
+    private val installer: AppInstaller? = null,
     private val analytics: AnalyticsTracker = NoOpAnalyticsTracker,
 ) : ViewModel() {
     private val mutable = MutableStateFlow(AppUpdateUiState())
@@ -53,7 +54,7 @@ class AppInfoViewModel(
                 detailMutable.value = ReleaseHistoryUiState(loaded = true, releases = listOfNotNull(release),
                     error = if (release == null) "未获取到此版本的发布信息" else null, hasMore = false)
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { analytics.networkFailure(NetworkOperation.UPDATE, failureCategory(error), HttpClass.UNKNOWN, RecoveryResult.FAILED); detailMutable.value = ReleaseHistoryUiState(error = "无法加载版本信息，请检查网络后重试", hasMore = false) }
+            catch (error: Exception) { analytics.networkFailure(NetworkOperation.UPDATE, failureCategory(error), HttpClass.UNKNOWN, RecoveryResult.FAILED); detailMutable.value = ReleaseHistoryUiState(error = failureFeedback(error, FailureOperation.UPDATE).text, hasMore = false) }
         }
     }
     init {
@@ -82,7 +83,7 @@ class AppInfoViewModel(
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) {
                 analytics.networkFailure(NetworkOperation.UPDATE, failureCategory(error), HttpClass.UNKNOWN, RecoveryResult.FAILED)
-                mutable.value = mutable.value.copy(checking = false, error = "检查失败，请检查网络后重试")
+                mutable.value = mutable.value.copy(checking = false, error = failureFeedback(error, FailureOperation.UPDATE).text)
             }
         }
     }
@@ -119,7 +120,7 @@ class AppInfoViewModel(
                 // Leave a downloaded task cancellable and retryable after a validation/intent failure.
                 val phase = if (previous.phase == InstallPhase.VERIFYING) InstallPhase.AWAITING_CONFIRMATION else previous.phase
                 mutable.value = mutable.value.copy(install = previous.copy(phase = phase,
-                    error = error.message ?: "安装更新失败，请重试"))
+                    error = installationError(error)))
             } finally { installBusy = false }
         }
     }
@@ -136,7 +137,7 @@ class AppInfoViewModel(
                     releases = ((if (refresh) emptyList() else state.releases) + releases.releases).distinctBy { it.tag },
                     nextPage = page + 1, hasMore = releases.hasMore)
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { analytics.networkFailure(NetworkOperation.UPDATE, failureCategory(error), HttpClass.UNKNOWN, RecoveryResult.FAILED); historyMutable.value = state.copy(error = "无法加载更新历史，请检查网络后重试") }
+            catch (error: Exception) { analytics.networkFailure(NetworkOperation.UPDATE, failureCategory(error), HttpClass.UNKNOWN, RecoveryResult.FAILED); historyMutable.value = state.copy(error = failureFeedback(error, FailureOperation.UPDATE).text) }
         }
     }
 }

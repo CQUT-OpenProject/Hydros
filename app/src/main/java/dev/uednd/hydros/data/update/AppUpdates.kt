@@ -1,11 +1,11 @@
 package dev.uednd.hydros.data.update
 
+import dev.uednd.hydros.data.feedback.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
@@ -36,18 +36,18 @@ class GitHubAppUpdates(
     private val endpoint: String = "https://api.github.com/repos/UE-DND/Hydros/releases/latest",
 ) : AppUpdateSource {
     override suspend fun latest(): AppRelease? = withContext(Dispatchers.IO) {
-        request(endpoint, allowMissing = true)?.let { parseRelease(it.jsonObject) }
+        request(endpoint, allowMissing = true)?.let { parseUpdateData { parseRelease(it.jsonObject) } }
     }
 
     override suspend fun history(page: Int): ReleasePage = withContext(Dispatchers.IO) {
         require(page > 0)
-        val entries = request("${endpoint.removeSuffix("/latest")}?per_page=30&page=$page")!!.jsonArray
-        ReleasePage(entries.mapNotNull { parseRelease(it.jsonObject) }, entries.size == 30)
+        val entries = parseUpdateData { request("${endpoint.removeSuffix("/latest")}?per_page=30&page=$page")!!.jsonArray }
+        ReleasePage(entries.mapNotNull { parseUpdateData { parseRelease(it.jsonObject) } }, entries.size == 30)
     }
 
     override suspend fun release(tag: String): AppRelease? = withContext(Dispatchers.IO) {
         val encoded = URLEncoder.encode(tag, "UTF-8").replace("+", "%20")
-        request("${endpoint.removeSuffix("/latest")}/tags/$encoded", allowMissing = true)?.let { parseRelease(it.jsonObject) }
+        request("${endpoint.removeSuffix("/latest")}/tags/$encoded", allowMissing = true)?.let { parseUpdateData { parseRelease(it.jsonObject) } }
     }
 
     private fun request(url: String, allowMissing: Boolean = false): JsonElement? {
@@ -57,18 +57,22 @@ class GitHubAppUpdates(
             .header("User-Agent", "Hydros-Android").build()
         return client.newCall(request).execute().use { response ->
             if (allowMissing && response.code == 404) return null
-            if (!response.isSuccessful) throw IOException("Update check failed: ${response.code}")
-            Json.parseToJsonElement(response.body.string())
+            if (!response.isSuccessful) throw AppFailure(FailureOperation.UPDATE, FailureStage.RESPONSE, FailureReason.REJECTED)
+            parseUpdateData { Json.parseToJsonElement(response.body.string()) }
         }
     }
 }
 
+private inline fun <T> parseUpdateData(block: () -> T): T = try { block() }
+catch (error: AppFailure) { throw error }
+catch (error: IllegalArgumentException) { throw AppFailure(FailureOperation.UPDATE, FailureStage.RESPONSE, FailureReason.INVALID_DATA, error) }
+
 internal fun parseRelease(json: JsonObject): AppRelease? {
     if (json["draft"]?.jsonPrimitive?.booleanOrNull != false ||
         json["prerelease"]?.jsonPrimitive?.booleanOrNull != false) return null
-    val tag = json["tag_name"]?.jsonPrimitive?.contentOrNull ?: throw IOException("Missing release tag")
+    val tag = json["tag_name"]?.jsonPrimitive?.contentOrNull ?: throw AppFailure(FailureOperation.UPDATE, FailureStage.RESPONSE, FailureReason.INVALID_DATA)
     val version = tag.removePrefix("v")
-    if (!Regex("[0-9]+\\.[0-9]+\\.[0-9]+").matches(version)) throw IOException("Unsupported release version")
+    if (!Regex("[0-9]+\\.[0-9]+\\.[0-9]+").matches(version)) throw AppFailure(FailureOperation.UPDATE, FailureStage.RESPONSE, FailureReason.INVALID_DATA)
     val assets = json["assets"]?.jsonArray.orEmpty().mapNotNull { element ->
         val asset = element.jsonObject
         val name = asset["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null

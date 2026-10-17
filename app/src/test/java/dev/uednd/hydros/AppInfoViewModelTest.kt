@@ -57,4 +57,30 @@ class AppInfoViewModelTest {
             assertFalse(model.history.value.hasMore)
         } finally { Dispatchers.resetMain() }
     }
+    @Test fun injectedInstallerFailureIsContextualAndRemainsRetryable() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val models = androidx.lifecycle.ViewModelStore()
+        try {
+            var starts = 0
+            val installer = object : AppInstaller {
+                override suspend fun refresh() = InstallState()
+                override suspend fun start(release: AppRelease): InstallState {
+                    starts++
+                    throw java.io.IOException("raw diagnostic must stay private")
+                }
+                override suspend fun installIntent(): android.content.Intent = throw InstallFailure(InstallIssue.MISSING_FILE)
+                override suspend fun cancel() = Unit
+            }
+            val model = AppInfoViewModel(AppUpdateSource { AppRelease("9.0.0", "v9.0.0", "") }, installer)
+            models.put("updates", model)
+            runCurrent()
+            model.installUpdate(); runCurrent()
+            assertEquals(1, starts)
+            assertTrue(model.updates.value.install.error!!.contains("存储空间"))
+            assertFalse(model.updates.value.install.error!!.contains("raw"))
+            model.installUpdate(); runCurrent()
+            assertEquals(2, starts)
+        } finally { models.clear(); runCurrent(); Dispatchers.resetMain() }
+    }
+
 }

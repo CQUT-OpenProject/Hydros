@@ -63,6 +63,7 @@ fun SoftwareUpdateScreen(
                                     Text(install.phase.label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                                     install.percent?.let { Text("${it.coerceIn(0, 100)}%", color = MaterialTheme.colorScheme.primary) }
                                 }
+                                install.statusMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                                 if (install.percent != null) LinearProgressIndicator(progress = { install.percent.coerceIn(0, 100) / 100f }, modifier = Modifier.fillMaxWidth())
                                 else LinearProgressIndicator(Modifier.fillMaxWidth())
                             }
