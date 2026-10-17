@@ -3,6 +3,16 @@ package dev.uednd.hydros.data.update
 import dev.uednd.hydros.data.feedback.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import dev.uednd.hydros.data.network.retryReadQuery
+import dev.uednd.hydros.data.network.QueryHttpFailure
+import dev.uednd.hydros.data.network.transientHttpStatus
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.Response
+import java.io.IOException
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlinx.serialization.json.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -32,7 +42,7 @@ fun interface AppUpdateSource {
 
 /** Only published, stable GitHub releases can announce an update. */
 class GitHubAppUpdates(
-    private val client: OkHttpClient = OkHttpClient.Builder().callTimeout(15, TimeUnit.SECONDS).build(),
+    private val client: OkHttpClient = OkHttpClient.Builder().retryOnConnectionFailure(false).callTimeout(15, TimeUnit.SECONDS).build(),
     private val endpoint: String = "https://api.github.com/repos/UE-DND/Hydros/releases/latest",
 ) : AppUpdateSource {
     override suspend fun latest(): AppRelease? = withContext(Dispatchers.IO) {
@@ -50,15 +60,39 @@ class GitHubAppUpdates(
         request("${endpoint.removeSuffix("/latest")}/tags/$encoded", allowMissing = true)?.let { parseUpdateData { parseRelease(it.jsonObject) } }
     }
 
-    private fun request(url: String, allowMissing: Boolean = false): JsonElement? {
-        val request = Request.Builder().url(url)
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .header("User-Agent", "Hydros-Android").build()
-        return client.newCall(request).execute().use { response ->
-            if (allowMissing && response.code == 404) return null
-            if (!response.isSuccessful) throw AppFailure(FailureOperation.UPDATE, FailureStage.RESPONSE, FailureReason.REJECTED)
-            parseUpdateData { Json.parseToJsonElement(response.body.string()) }
+    private suspend fun request(url: String, allowMissing: Boolean = false): JsonElement? = retryReadQuery { budget ->
+        budget.attempt {
+            val request = Request.Builder().url(url)
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("User-Agent", "Hydros-Android").build()
+            suspendCancellableCoroutine<JsonElement?> { continuation ->
+                val call = client.newCall(request)
+                continuation.invokeOnCancellation { call.cancel() }
+                call.enqueue(object : Callback {
+                    override fun onFailure(call: Call, e: IOException) {
+                        if (continuation.isActive) continuation.resumeWithException(e)
+                    }
+                    override fun onResponse(call: Call, response: Response) {
+                        response.use {
+                            if (!continuation.isActive) return
+                            try {
+                                val result = when {
+                                    allowMissing && response.code == 404 -> null
+                                    transientHttpStatus(response.code) -> throw QueryHttpFailure(response.code,
+                                        response.header("Retry-After")?.toLongOrNull()?.takeIf { it in 0..3 }?.times(1_000)
+                                            ?: response.header("Retry-After")?.let { Long.MAX_VALUE })
+                                    !response.isSuccessful -> throw AppFailure(FailureOperation.UPDATE, FailureStage.RESPONSE, FailureReason.REJECTED)
+                                    else -> parseUpdateData { Json.parseToJsonElement(response.body.string()) }
+                                }
+                                if (continuation.isActive) continuation.resume(result)
+                            } catch (error: Exception) {
+                                if (continuation.isActive) continuation.resumeWithException(error)
+                            }
+                        }
+                    }
+                })
+            }
         }
     }
 }

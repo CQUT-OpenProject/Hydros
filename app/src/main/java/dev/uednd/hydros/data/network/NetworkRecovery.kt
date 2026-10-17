@@ -38,8 +38,8 @@ class NetworkRecovery(
     private data class Preference(val wifi: Long?, val at: Long)
     @Volatile private var preference: Preference? = null
 
-    suspend fun <T : Any> execute(api: CampusApi, path: String, post: Boolean, request: suspend (CampusApi) -> T): T {
-        val readOnly = if (!post) path == "device/info/mac" else path in READ_ONLY_POSTS
+    suspend fun <T : Any> execute(api: CampusApi, path: String, post: Boolean, request: suspend (CampusApi) -> T, canFallback: () -> Boolean = { true }): T {
+        val readOnly = isReadOnlyCampusRequest(path, post)
         val wifi = access.wifiNetwork()
         val preferred = preference?.let { wifi != null && it.wifi == wifi && now() - it.at in 0..60_000 } == true
         suspend fun attempt(selected: CampusApi, cellular: Boolean): T {
@@ -84,7 +84,7 @@ class NetworkRecovery(
         try {
             return attempt(api, false)
         } catch (error: IOException) {
-            if (!readOnly || wifi == null || !recoverable(error)) throw error
+            if (!readOnly || wifi == null || !recoverable(error) || !canFallback()) throw error
             return viaCellular()
         }
     }
@@ -92,10 +92,4 @@ class NetworkRecovery(
     private fun recoverable(error: IOException) = error is SocketException || error is SocketTimeoutException ||
         error is UnknownHostException || error is EOFException
 
-    private companion object {
-        val READ_ONLY_POSTS = setOf(
-            "order/tcpDevice/query/rateOrder/using", "order/tcpDevice/query/downRateResult",
-            "order/consumeOrder/result/query",
-        )
-    }
 }

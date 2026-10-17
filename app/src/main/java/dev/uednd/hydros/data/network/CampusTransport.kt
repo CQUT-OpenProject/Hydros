@@ -31,11 +31,25 @@ class HttpCampusTransport(private val api: CampusApi, private val isCurrent: (Cr
         if (auth != null && !isCurrent(auth)) throw ApiFailure(null, "登录状态已变化", true)
         // Business telephone overrides authentication telephone only for SMS to a new number.
         val params = (auth?.fields() ?: emptyMap()) + fields
-        val request: suspend (CampusApi) -> retrofit2.Response<ApiResponse<JsonElement>> = { selected ->
-            if (auth != null && !isCurrent(auth)) throw ApiFailure(null, "登录状态已变化", true)
-            if (post) selected.post(path, params, auth?.headers() ?: emptyMap()) else selected.get(path, params, auth?.headers() ?: emptyMap())
+        suspend fun execute(budget: QueryRetryBudget?): retrofit2.Response<ApiResponse<JsonElement>> {
+            val request: suspend (CampusApi) -> retrofit2.Response<ApiResponse<JsonElement>> = { selected ->
+                if (auth != null && !isCurrent(auth)) throw ApiFailure(null, "登录状态已变化", true)
+                val send: suspend () -> retrofit2.Response<ApiResponse<JsonElement>> = {
+                    val response = if (post) selected.post(path, params, auth?.headers() ?: emptyMap())
+                        else selected.get(path, params, auth?.headers() ?: emptyMap())
+                    if (budget != null && transientHttpStatus(response.code())) {
+                        response.errorBody()?.close()
+                        throw QueryHttpFailure(response.code(), response.headers()["Retry-After"]?.toLongOrNull()
+                            ?.takeIf { it in 0..3 }?.times(1_000)
+                            ?: response.headers()["Retry-After"]?.let { Long.MAX_VALUE })
+                    }
+                    response
+                }
+                if (budget == null) send() else budget.attempt(send)
+            }
+            return recovery?.execute(api, path, post, request, canFallback = { budget?.available != false }) ?: request(api)
         }
-        val response = recovery?.execute(api, path, post, request) ?: request(api)
+        val response = if (isReadOnlyCampusRequest(path, post)) retryReadQuery { execute(it) } else execute(null)
         if (auth != null && !isCurrent(auth)) throw ApiFailure(null, "登录状态已变化", true)
         if (auth != null && response.code() in listOf(401, 403)) { onExpired(auth); throw ApiFailure(response.code(), "登录已失效，请重新登录", true) }
         if (!response.isSuccessful) throw AppFailure(feedbackOperationFor(path), FailureStage.RESPONSE, FailureReason.REJECTED, ApiFailure(response.code(), "HTTP rejection"))
