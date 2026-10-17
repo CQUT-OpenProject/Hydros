@@ -88,11 +88,11 @@ class DeviceDetailTest {
         }
         ui.runOnIdle { session = session.copy(stage = SessionStage.SETTLEMENT_PENDING, endedAt = session.startedAt + 5_000) }
         ui.onNodeWithText("00:05").assertExists()
-        ui.onNodeWithText("重试结算").performScrollTo().performClick()
+        ui.onNodeWithText("继续结算").performScrollTo().performClick()
         ui.mainClock.advanceTimeBy(2_000)
         ui.onNodeWithText("00:05").assertExists()
         ui.runOnIdle { session = session.copy(stage = SessionStage.WRITEBACK_PENDING) }
-        ui.onNodeWithText("重试清除设备记录").performScrollTo().performClick()
+        ui.onNodeWithText("清除设备记录").performScrollTo().performClick()
         assertEquals(2, retries)
     }
 
@@ -374,7 +374,7 @@ class DeviceDetailTest {
                 SessionScreen(session, onFinish = { finishes++ }, onHome = { home++ })
             } } }
         }
-        val button = ui.onNodeWithText("点击以结束使用")
+        val button = ui.onNodeWithText("重试关闭")
         button.performScrollTo()
         repeat(2) {
             button.performClick()
@@ -395,7 +395,7 @@ class DeviceDetailTest {
         }
         listOf(SessionStage.OPENING, SessionStage.STOPPING, SessionStage.SETTLING).forEach {
             ui.runOnIdle { stage = it }
-            ui.onNode((hasText("正在开启") or hasText("正在关闭") or hasText("设备已关闭，正在结算")) and hasClickAction()).assertIsNotEnabled()
+            ui.onNode((hasText("正在开启") or hasText("正在关闭") or hasText("正在核实结算")) and hasClickAction()).assertIsNotEnabled()
         }
         ui.runOnIdle { stage = SessionStage.USING }
         ui.onNodeWithText("点击以结束使用").assertIsEnabled()

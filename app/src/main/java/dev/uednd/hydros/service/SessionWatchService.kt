@@ -15,6 +15,11 @@ import dev.uednd.hydros.R
 import dev.uednd.hydros.data.HydrosApplication
 import dev.uednd.hydros.data.safely
 import dev.uednd.hydros.ui.state.SessionUi
+import dev.uednd.hydros.ui.state.sessionActionLabel
+import dev.uednd.hydros.ui.state.sessionNotificationText
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -54,25 +59,36 @@ class SessionWatchService : Service() {
         return Notification.Builder(this, "session")
             .setSmallIcon(R.drawable.ic_water)
             .setContentTitle(value?.device?.name ?: "设备使用准备中")
-            .setContentText(value?.stage?.label ?: "正在准备设备会话")
+            .setContentText(sessionNotificationText(value, graph.sessions.observation.value))
+            .setStyle(Notification.BigTextStyle().bigText(sessionNotificationText(value, graph.sessions.observation.value)))
             .setContentIntent(open)
             .setOngoing(true)
-            .addAction(Notification.Action.Builder(null, "结束使用 / 重试", close).build())
+            .addAction(Notification.Action.Builder(null, value?.let(::sessionActionLabel) ?: "打开应用处理", close).build())
             .build()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "finish") {
-            scope.launch { safely { graph.restore(); graph.sessions.finish(graph.auth.credentials.value) } }
+            scope.launch {
+                try { graph.restore(); graph.sessions.finish(graph.auth.credentials.value) }
+                catch (error: CancellationException) { throw error }
+                catch (error: Exception) {
+                    graph.sessions.reportActionFailure(error)
+                    getSystemService(NotificationManager::class.java).notify(1, notification())
+                }
+            }
         }
         if (watch == null) {
             watch = scope.launch {
                 try {
                     safely {
                         graph.restore()
-                        graph.sessionMonitor().watch { session ->
-                            getSystemService(NotificationManager::class.java).notify(1, notification(session))
+                        val notificationUpdates = launch {
+                            combine(graph.sessions.session, graph.sessions.observation) { session, _ -> session }.collect { session ->
+                                if (session != null) getSystemService(NotificationManager::class.java).notify(1, notification(session))
+                            }
                         }
+                        try { graph.sessionMonitor().watch {} } finally { notificationUpdates.cancel() }
                     }
                 } finally {
                     watch = null

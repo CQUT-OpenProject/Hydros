@@ -469,7 +469,7 @@ class HydrosFlowTest {
         click("当前版本"); waitFor("前往更新")
         ui.onNodeWithText("测试更新说明").assertExists()
         failRefresh = true
-        click("重新检查"); waitFor("检查失败，请检查网络后重试")
+        click("重新检查"); waitFor("检查更新失败，请检查网络后重试")
         ui.onNodeWithText("前往更新").assertExists()
     }
     @Test fun loginDoesNotAcceptLocallyValidButIncorrectPassword() {
@@ -497,7 +497,7 @@ class HydrosFlowTest {
     }
     @Test fun restorationShowsUnconfirmedSessionAndBlocksLogout() {
         val device=DeviceUi("AABBCCDDEEFF","测试用水表","测试宿舍",DeviceCategory.SHOWER,channel=ControlChannel.CLOUD)
-        open(session=SessionUi(device,credentials.key,stage=SessionStage.OPEN_UNCONFIRMED,message="开启结果待确认"))
+        open(session=SessionUi(device,credentials.key,stage=SessionStage.OPEN_UNCONFIRMED,recoveryReason = dev.uednd.hydros.ui.state.SessionRecoveryReason.OPEN_UNKNOWN))
         waitFor("开启待确认")
         click("返回首页"); click("我的")
         click("管理账户"); click("退出账户")

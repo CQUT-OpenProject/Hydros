@@ -204,7 +204,7 @@ class SessionRepositoryTest {
         s.updateAccount(auth.key) { it.copy(session=SessionUi(device(ControlChannel.BLE),auth.key,stage=SessionStage.USING,orderNo="own",consumeDate="20261014120000",rateAttempted=true)) }
         r.restore(auth)
         val failure = runCatching { r.finish(auth) }.exceptionOrNull()
-        assertTrue(failure is ApiFailure)
+        assertTrue(failure is dev.uednd.hydros.data.feedback.AppFailure)
         assertEquals(SessionStage.SETTLEMENT_PENDING, r.session.value?.stage)
         assertFalse(r.session.value?.failureReportPending == true)
         assertEquals(0, t.requests.count { it.first.contains("upload/bluetooth/fail") })

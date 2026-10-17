@@ -38,7 +38,9 @@ fun DeviceUi.displayName(remarks: Map<String, String>): String = remarks[id]?.ta
     val uploaded: Boolean = false, val rateAttempted: Boolean = false, val uploadAttempted: Boolean = false,
     val writeBackHex: String? = null, val failureReportPending: Boolean = false,
     val deviceUseChanged: Boolean = false,
-    val message: String? = null, val endedAt: Long? = null)
+    val recoveryReason: SessionRecoveryReason? = null, val endedAt: Long? = null) {
+    val message: String? get() = sessionFeedback(this)?.text
+}
 enum class BillType(val requestType: String, val label: String) {
     CONSUMPTION("2", "消费记录"), RECHARGE("1", "充值记录")
 }

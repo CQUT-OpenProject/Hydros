@@ -1,5 +1,6 @@
 package dev.uednd.hydros.data.repository
 
+import dev.uednd.hydros.data.feedback.*
 import dev.uednd.hydros.data.ble.*
 import dev.uednd.hydros.data.network.*
 import dev.uednd.hydros.data.storage.HydrosStore
@@ -22,7 +23,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonObject
 
+private val EMPTY_SESSION_OBSERVATION = MutableStateFlow(SessionObservation()).asStateFlow()
+
 interface SessionRepository {
+    val observation: kotlinx.coroutines.flow.StateFlow<SessionObservation> get() = EMPTY_SESSION_OBSERVATION
+    fun reportActionFailure(error: Exception) {}
     val session: kotlinx.coroutines.flow.StateFlow<SessionUi?>
     suspend fun restore(auth: Credentials?)
     suspend fun start(auth: Credentials, device: DeviceUi)
@@ -34,6 +39,24 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
     private val pause: suspend () -> Unit = { delay(800) }) : SessionRepository {
     private val current = MutableStateFlow<SessionUi?>(null)
     override val session = current.asStateFlow()
+    private val observed = MutableStateFlow(SessionObservation())
+    override val observation = observed.asStateFlow()
+    override fun reportActionFailure(error: Exception) {
+        val value = current.value ?: return
+        if (value.endedAt == null) updateObservation(false)
+        if (observed.value.deviceId != value.device.id || observed.value.startedAt != value.startedAt)
+            observed.value = SessionObservation(value.device.id, value.startedAt)
+        observed.value = observed.value.copy(actionError = value.message ?: failureFeedback(error, FailureOperation.FINISH).text)
+    }
+    private fun updateObservation(success: Boolean) {
+        val value = current.value ?: return
+        val old = observed.value.takeIf { it.deviceId == value.device.id && it.startedAt == value.startedAt } ?: SessionObservation(value.device.id, value.startedAt)
+        observed.value = old.copy(lastConfirmedAt = if (success) System.currentTimeMillis() else old.lastConfirmedAt,
+            unavailable = !success, actionError = if (success) null else old.actionError)
+    }
+    private fun markDeviceUnavailable() {
+        if (current.value?.endedAt == null) updateObservation(false)
+    }
     private val finishRequests = AtomicInteger()
     @Volatile private var activeProbe: Deferred<*>? = null
 
@@ -54,7 +77,7 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
         activeProbe = probe
         try {
             if (finishRequests.get() > 0) probe.cancel()
-            probe.await()
+            probe.await().also { if (it == null && finishRequests.get() == 0) markDeviceUnavailable() }
         } catch (error: CancellationException) {
             currentCoroutineContext().ensureActive()
             if (finishRequests.get() == 0) throw error
@@ -66,6 +89,7 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
     override suspend fun restore(auth: Credentials?) = operation.withLock {
         val key=auth?.key ?: current.value?.ownerKey ?: store.lastAccount()
         val restored=key?.let { store.account(it).session }
+        observed.value = SessionObservation()
         current.value=restored?.copy(stage=when(restored.stage) {
             SessionStage.OPENING -> SessionStage.OPEN_UNCONFIRMED
             SessionStage.STOPPING -> SessionStage.CLOSE_UNCONFIRMED
@@ -74,10 +98,13 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
         })
     }
     private suspend fun save(value: SessionUi) {
+        val previous = current.value
         store.updateAccount(value.ownerKey) { it.copy(session=value) }
         current.value = value
+        if (value.stage == SessionStage.USING || value.endedAt != null && previous?.endedAt == null) updateObservation(true)
     }
     private suspend fun clear(value: SessionUi) {
+        observed.value = SessionObservation()
         store.updateAccount(value.ownerKey) { it.copy(session=null) }; current.value = null; ble.disconnect()
     }
     override suspend fun start(auth: Credentials, device: DeviceUi) = operation.withLock {
@@ -125,25 +152,29 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
                 save(value.copy(stage=SessionStage.USING, orderNo=requireNotNull(confirmation.text("orderNo")), consumeDate=confirmation.text("consumeDate") ?: ""))
                 return
             }
-            value = value.copy(stage=SessionStage.OPEN_UNCONFIRMED, message="开启结果待确认，请勿重复开启")
+            value = value.copy(stage=SessionStage.OPEN_UNCONFIRMED, recoveryReason=SessionRecoveryReason.OPEN_UNKNOWN)
             save(value)
         } catch(e: Exception) {
             withContext(NonCancellable) {
-                if(current.value != null) save(value.copy(stage=SessionStage.OPEN_UNCONFIRMED, message="开启结果待确认，请核实设备状态"))
+                if(current.value != null) save(value.copy(stage=SessionStage.OPEN_UNCONFIRMED, recoveryReason=sessionRecoveryReason(e)))
             }
             throw e
         }
     }
-    private suspend fun connect(value: SessionUi) {
-        if (!ble.isConnectedTo(value.device.connectMac) &&
-            ble.connectWithRetry(value.device.connectMac) !is BleConnectResult.Ready) throw ApiFailure(null, "蓝牙无法连接，请靠近设备重试")
+    private suspend fun connect(value: SessionUi, operation: FailureOperation = FailureOperation.FINISH) {
+        if (!ble.isConnectedTo(value.device.connectMac)) failureBoundary(operation, FailureStage.BLE_CONNECT) { ble.connectWithRetry(value.device.connectMac) }.requireReady(operation)
         if (!ble.isConnectedTo(value.device.connectMac)) throw ApiFailure(null, "蓝牙连接目标不匹配，请重新连接")
     }
     private suspend fun startBle(auth: Credentials, device: DeviceUi) {
         var value = SessionUi(device, auth.key)
-        connect(value)
-        val state = ble.query() ?: throw ApiFailure(null, "无法读取设备状态")
-        if(state.state != 0) throw ApiFailure(307, "设备正在使用或存在未结算记录；当前账户没有可恢复的订单")
+        connect(value, FailureOperation.START)
+        val state = ble.query() ?: throw ble.commandError(FailureOperation.START)
+        when (state.state) {
+            0 -> Unit
+            1 -> throw ApiFailure(307, "设备正在使用，请选择其他设备")
+            3, 6 -> throw ApiFailure(null, "设备有未结算记录，请在原使用账户或服务商官方应用完成结算")
+            else -> throw ApiFailure(null, "暂时无法确认设备状态，请稍后重新连接")
+        }
         if(device.deviceId.isBlank() || device.bigTypeId == null || device.smallTypeId == null) throw ApiFailure(null, "设备缺少费率请求参数")
         val signature = BleSignBuilder.signRateOrder(auth.loginCode, auth.phone, device.deviceId, "0", state.randomNumber) ?: throw ApiFailure(null, "费率签名失败")
         val ledgerMac = MacFormat.normalize(device.ledgerMac) ?: throw ApiFailure(null, "设备地址无效")
@@ -173,12 +204,12 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
             value=value.copy(rateAttempted=true, failureReportPending=false); save(value)
             val confirmed = ble.writeRate(requireNotNull(bytes))
             save(value.copy(stage=if(confirmed) SessionStage.USING else SessionStage.OPEN_UNCONFIRMED,
-                message=if(confirmed) null else "费率已发送，开启待确认；请勿重复开启"))
+                recoveryReason=if(confirmed) null else sessionRecoveryReason(ble.commandError(FailureOperation.START))))
         } catch(e: Exception) {
             withContext(NonCancellable) {
                 current.value?.let { pending ->
                     save(pending.copy(stage=if(pending.rateAttempted) SessionStage.OPEN_UNCONFIRMED else SessionStage.SETTLEMENT_PENDING,
-                        message=if(pending.rateAttempted) "蓝牙开启结果未知，请重新核实" else "设备未开启，费率订单结果待核实；请勿重复开启"))
+                        recoveryReason=if(pending.rateAttempted) sessionRecoveryReason(e) else SessionRecoveryReason.NOT_OPENED))
                 }
             }
             throw e
@@ -204,8 +235,8 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
         } catch(e: Exception) {
             val pending=current.value
             if(pending != null && e !is CancellationException) {
-                if(pending.stage==SessionStage.STOPPING) save(pending.copy(stage=SessionStage.CLOSE_UNCONFIRMED, message="设备关闭尚未确认，请重试"))
-                if(pending.stage==SessionStage.SETTLING) save(pending.copy(stage=SessionStage.SETTLEMENT_PENDING, message="设备结算待恢复，请重试"))
+                if(pending.stage==SessionStage.STOPPING) save(pending.copy(stage=SessionStage.CLOSE_UNCONFIRMED, recoveryReason=sessionRecoveryReason(e)))
+                if(pending.stage==SessionStage.SETTLING) save(pending.copy(stage=SessionStage.SETTLEMENT_PENDING, recoveryReason=sessionRecoveryReason(e)))
             }
             throw e
         }
@@ -218,7 +249,7 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
                 when {
                     running is RunningOrder.Running && running.owner == true && !running.orderNo.isNullOrBlank() -> value = value.copy(orderNo=running.orderNo)
                     running == RunningOrder.Ended -> { settleEndedCloud(auth, value); return }
-                    else -> { save(value.copy(stage=SessionStage.CLOSE_UNCONFIRMED, message="未取得本人订单号，无法确认关闭")); return }
+                    else -> { save(value.copy(stage=SessionStage.CLOSE_UNCONFIRMED, recoveryReason=SessionRecoveryReason.MISSING_ORDER)); return }
                 }
             }
             save(value.copy(stage=SessionStage.STOPPING))
@@ -229,7 +260,7 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
             }
             catch(e: Exception) {
                 withContext(NonCancellable) {
-                    save(value.copy(stage=SessionStage.CLOSE_UNCONFIRMED, message="关闭请求未确认，可重新核实"))
+                    save(value.copy(stage=SessionStage.CLOSE_UNCONFIRMED, recoveryReason=sessionRecoveryReason(e)))
                 }
                 throw e
             }
@@ -244,7 +275,7 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
                 }
                 false
             } ?: false
-            if(!closed) { save(value.copy(stage=SessionStage.CLOSE_UNCONFIRMED, message="设备关闭待确认，请检查水流并重试")); return }
+            if(!closed) { save(value.copy(stage=SessionStage.CLOSE_UNCONFIRMED, recoveryReason=SessionRecoveryReason.CLOSE_UNKNOWN)); return }
             value = value.copy(stage=SessionStage.SETTLING, endedAt=System.currentTimeMillis()); save(value)
         }
         settleCloud(auth, value)
@@ -257,7 +288,7 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
             if (result == null || background && finishRequests.get() > 0) return
             val data = confirmedOpening(auth, value, result)
             if (data == null) {
-                save(value.copy(message="当前没有使用中订单，原开启结果仍待核实；请稍后重试，持续失败请联系服务商"))
+                save(value.copy(recoveryReason=SessionRecoveryReason.OPEN_UNKNOWN))
                 return
             }
             value = value.copy(orderNo=requireNotNull(data.text("orderNo")), consumeDate=data.text("consumeDate").orEmpty())
@@ -272,8 +303,8 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
             val data = response.data as? JsonObject
             if(response.ok && data?.text("orderNo") == value.orderNo && matchesSessionIdentity(auth, value.device, data) &&
                 yuanMilli(data.text("consumeMoney")) != null) { clear(value); return }
-            save(value.copy(stage=SessionStage.SETTLEMENT_PENDING, message="设备已关闭，服务端结算待完成"))
-        } catch(e: Exception) { save(value.copy(stage=SessionStage.SETTLEMENT_PENDING, message="设备已关闭，结算查询失败，可重试")); throw e }
+            save(value.copy(stage=SessionStage.SETTLEMENT_PENDING, recoveryReason=SessionRecoveryReason.SETTLEMENT_PENDING))
+        } catch(e: Exception) { save(value.copy(stage=SessionStage.SETTLEMENT_PENDING, recoveryReason=SessionRecoveryReason.SETTLEMENT_PENDING)); throw e }
     }
     private suspend fun finishBle(auth: Credentials?, original: SessionUi, background: Boolean = false) {
         var value = original
@@ -289,23 +320,23 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
                 // A lost acknowledgement can follow a successful close, including an already idle device.
                 connect(value)
                 if (ble.query()?.state == 0) { recoverIdleBle(auth, value, background); return }
-                save(value.copy(stage=SessionStage.CLOSE_UNCONFIRMED, message="关阀未确认，请靠近设备重试"))
+                save(value.copy(stage=SessionStage.CLOSE_UNCONFIRMED, recoveryReason=SessionRecoveryReason.CLOSE_UNKNOWN))
                 return
             }
             value = value.copy(stage=SessionStage.SETTLING); save(value)
             ble.disconnect(); connect(value) // Use fresh post-close encrypted consumption state.
         }
-        val state = ble.query() ?: throw ApiFailure(null, "设备状态读取失败，恢复信息已保留")
+        val state = ble.query() ?: throw ble.commandError(FailureOperation.FINISH)
         if(state.state == 1) {
             if (value.uploaded || value.uploadAttempted || value.endedAt != null) {
                 observeReplacedBle(auth, value, background)
-            } else save(value.copy(stage=SessionStage.CLOSE_UNCONFIRMED, message="设备仍在使用，请重试关阀"))
+            } else save(value.copy(stage=SessionStage.CLOSE_UNCONFIRMED, recoveryReason=SessionRecoveryReason.CLOSE_UNKNOWN))
             return
         }
         if(state.state !in listOf(0, 3, 6)) throw ApiFailure(null, "设备状态未知，未执行结算")
         if (state.state == 0) { recoverIdleBle(auth, value, background); return }
         value = value.copy(endedAt = value.endedAt ?: System.currentTimeMillis())
-        if(auth == null) { save(value.copy(stage=SessionStage.SETTLEMENT_PENDING, message="设备已关闭，请登录原账户上传消费")); return }
+        if(auth == null) { save(value.copy(stage=SessionStage.SETTLEMENT_PENDING, recoveryReason=SessionRecoveryReason.LOGIN_REQUIRED)); return }
         try {
             if((value.uploadAttempted && !value.uploaded) || (value.uploaded && value.writeBackHex.isNullOrBlank())) {
                 val result=if(value.orderNo.isNotBlank()) transport.post("order/consumeOrder/result/query",
@@ -320,7 +351,7 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
                 } else throw ApiFailure(null, "上次消费上传结果未知，等待服务端核实；不会重复上传")
             }
             if(!value.uploaded) {
-                val payload = ble.collect()?.takeIf { it.isNotEmpty() } ?: throw ApiFailure(null, "消费采集失败")
+                val payload = ble.collect()?.takeIf { it.isNotEmpty() } ?: throw ble.commandError(FailureOperation.FINISH)
                 val hex = BleFrame.toHex(payload).lowercase()
                 val signature = BleSignBuilder.signUpload(auth.loginCode, auth.phone, hex) ?: throw ApiFailure(null, "消费签名失败")
                 value=value.copy(uploadAttempted=true); save(value)
@@ -339,7 +370,7 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
                 val back = data.text("clData")?.let(DeviceCrypto::decryptByAes)?.substringAfter('-', "")
                     ?.takeIf { BleFrame.fromHex(it)?.size in 1..BleFrame.MAX_PAYLOAD_BYTES }
                 value = value.copy(uploaded=true, writeBackHex=back, stage=SessionStage.WRITEBACK_PENDING, failureReportPending=false,
-                    message="服务端已记账，设备记录待清除")
+                    recoveryReason=SessionRecoveryReason.WRITEBACK_PENDING)
                 save(value) // Never upload again after this point, even after a crash.
             }
             val bytes = value.writeBackHex?.let(BleFrame::fromHex)?.takeIf { it.size in 1..BleFrame.MAX_PAYLOAD_BYTES }
@@ -350,24 +381,26 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
                 3, 6 -> Unit
                 else -> throw ApiFailure(null, "写回前无法确认设备已关闭，恢复信息已保留")
             }
-            if(!ble.writeBack(bytes) || ble.query()?.state != 0) throw ApiFailure(null, "设备记录尚未清除，请重试写回")
+            if (!ble.writeBack(bytes)) throw ble.commandError(FailureOperation.FINISH)
+            val cleared = ble.query() ?: throw ble.commandError(FailureOperation.FINISH)
+            if (cleared.state != 0) throw AppFailure(FailureOperation.FINISH, FailureStage.BLE_COMMAND, FailureReason.REJECTED)
             clear(value)
         } catch(e: Exception) {
             if(e is CancellationException) throw e
             save(value.copy(stage=if(value.uploaded) SessionStage.WRITEBACK_PENDING else SessionStage.SETTLEMENT_PENDING,
-                message=e.message ?: "结算待恢复", failureReportPending=false))
+                recoveryReason=sessionRecoveryReason(e), failureReportPending=false))
             throw e
         }
     }
     private suspend fun recoverIdleBle(auth: Credentials?, original: SessionUi, background: Boolean = false) {
         val value = original.copy(stage=SessionStage.SETTLEMENT_PENDING,
-            endedAt=original.endedAt ?: System.currentTimeMillis(), message="设备已空闲，原订单结算待核实")
+            endedAt=original.endedAt ?: System.currentTimeMillis(), recoveryReason=SessionRecoveryReason.SETTLEMENT_PENDING)
         // An idle device has no consumption record to collect or clear. Never upload empty/stale data.
         if (value.uploaded) { clear(value); return }
         save(value)
-        if (auth == null) { save(value.copy(message="设备已空闲，请登录原账户核实结算")); return }
+        if (auth == null) { save(value.copy(recoveryReason=SessionRecoveryReason.LOGIN_REQUIRED)); return }
         if (value.orderNo.isBlank()) {
-            save(value.copy(message="设备已空闲，但缺少原订单号，无法核实结算；请联系服务商处理"))
+            save(value.copy(recoveryReason=SessionRecoveryReason.MISSING_ORDER))
             return
         }
         val query = suspend { transport.post("order/consumeOrder/result/query",
@@ -380,8 +413,7 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
     }
     private suspend fun cancelUnusedBle(auth: Credentials?, original: SessionUi) {
         val value = original.copy(stage=SessionStage.SETTLEMENT_PENDING, failureReportPending=true,
-            message=if(original.consumeDate.isBlank()) "设备未开启，未取得费率订单恢复凭据；请联系服务商核实，勿重复开启"
-                else "设备未开启，费率订单取消待确认")
+            recoveryReason=if(original.consumeDate.isBlank()) SessionRecoveryReason.MISSING_ORDER else SessionRecoveryReason.NOT_OPENED)
         if (value != original) save(value)
         if (auth == null || value.consumeDate.isBlank()) return
         val signature = BleSignBuilder.signFail(auth.loginCode, auth.phone, value.consumeDate)
@@ -398,7 +430,7 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
     }
     private suspend fun observeReplacedBle(auth: Credentials?, value: SessionUi, background: Boolean) {
         val changed = value.copy(deviceUseChanged=true, stage=SessionStage.SETTLEMENT_PENDING,
-            message="设备已有新的使用，本次仅核实原订单结算")
+            recoveryReason=SessionRecoveryReason.DEVICE_CHANGED)
         save(changed)
         settleReplacedBle(auth, changed, background)
     }
@@ -423,28 +455,34 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
                 else if(value.stage == SessionStage.OPENING || value.stage == SessionStage.OPEN_UNCONFIRMED) {
                     val state = probeBle(value) ?: return
                     if (finishRequests.get() > 0) return
-                    if(state.state == 1) save(value.copy(stage=SessionStage.USING, message=null))
+                    if(state.state == 1) save(value.copy(stage=SessionStage.USING, recoveryReason=null))
                     else if (state.state == 0) recoverIdleBle(auth, value, background=true)
-                    else if(state.state in listOf(3, 6)) save(value.copy(stage=SessionStage.SETTLEMENT_PENDING, message="设备有消费记录，待结算"))
+                    else if(state.state in listOf(3, 6)) save(value.copy(stage=SessionStage.SETTLEMENT_PENDING, recoveryReason=SessionRecoveryReason.SETTLEMENT_PENDING))
                 }
                 return
             }
             if(auth == null) return
             if(value.stage in listOf(SessionStage.SETTLING, SessionStage.SETTLEMENT_PENDING)) { settleCloud(auth, value); return }
-            when(val running = backgroundProbe { transport.running(auth, value.device) } ?: return) {
+            val running = backgroundProbe { transport.running(auth, value.device) } ?: return
+            updateObservation(running != RunningOrder.Unknown)
+            when(running) {
                 is RunningOrder.Running -> when {
                     value.orderNo.isNotBlank() && !running.orderNo.isNullOrBlank() && value.orderNo != running.orderNo ->
                         settleEndedCloud(auth, value, background=true)
                     running.owner == true && !running.orderNo.isNullOrBlank() -> save(value.copy(orderNo=running.orderNo,
-                        stage=if(value.stage in listOf(SessionStage.OPENING, SessionStage.OPEN_UNCONFIRMED)) SessionStage.USING else value.stage, message=null))
+                        stage=if(value.stage in listOf(SessionStage.OPENING, SessionStage.OPEN_UNCONFIRMED)) SessionStage.USING else value.stage, recoveryReason=null))
                 }
                 RunningOrder.Ended -> settleEndedCloud(auth, value, background=true)
                 RunningOrder.Unknown -> Unit
             }
-        } finally { operation.unlock() }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) { markDeviceUnavailable(); throw error }
+        finally { operation.unlock() }
     }
     private suspend fun probeBle(value: SessionUi): DeviceQueryState? = backgroundProbe(localBle=true) {
         connect(value)
-        withTimeoutOrNull(4_000) { ble.query() }
+        val state = withTimeoutOrNull(4_000) { ble.query() }
+        updateObservation(state != null && state.state in listOf(0, 1, 3, 6))
+        state
     }
 }

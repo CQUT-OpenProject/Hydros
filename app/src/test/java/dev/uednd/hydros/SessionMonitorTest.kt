@@ -191,7 +191,7 @@ class SessionMonitorTest {
         backgroundScope.launch { monitor.watch {} }
         runCurrent()
         advanceTimeBy(2_000)
-        sessions.session.value = sessions.session.value!!.copy(message = "updated")
+        sessions.session.value = sessions.session.value!!.copy(recoveryReason = dev.uednd.hydros.ui.state.SessionRecoveryReason.STATE_UNKNOWN)
         runCurrent()
         advanceTimeBy(8_000); runCurrent()
         assertEquals(2, sessions.reconciliations.size)
