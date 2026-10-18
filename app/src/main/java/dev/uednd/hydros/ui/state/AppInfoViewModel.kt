@@ -1,15 +1,26 @@
 package dev.uednd.hydros.ui.state
 
-import dev.uednd.hydros.data.feedback.*
 import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.uednd.hydros.BuildConfig
-import dev.uednd.hydros.data.update.*
-import dev.uednd.hydros.data.analytics.*
+import dev.uednd.hydros.data.analytics.AnalyticsTracker
+import dev.uednd.hydros.data.analytics.HttpClass
+import dev.uednd.hydros.data.analytics.NetworkOperation
+import dev.uednd.hydros.data.analytics.NoOpAnalyticsTracker
+import dev.uednd.hydros.data.analytics.RecoveryResult
+import dev.uednd.hydros.data.analytics.failureCategory
+import dev.uednd.hydros.data.feedback.FailureOperation
+import dev.uednd.hydros.data.feedback.failureFeedback
+import dev.uednd.hydros.data.update.AppInstaller
+import dev.uednd.hydros.data.update.AppRelease
+import dev.uednd.hydros.data.update.AppUpdateSource
+import dev.uednd.hydros.data.update.GitHubAppUpdates
+import dev.uednd.hydros.data.update.InstallState
+import dev.uednd.hydros.data.update.installationError
+import dev.uednd.hydros.data.update.isNewerRelease
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -45,6 +56,7 @@ class AppInfoViewModel(
     private val detailMutable = MutableStateFlow(ReleaseHistoryUiState())
     val detail = detailMutable.asStateFlow()
     private var detailJob: Job? = null
+
     fun loadRelease(tag: String) {
         detailJob?.cancel()
         detailMutable.value = ReleaseHistoryUiState(loading = true)
@@ -57,17 +69,12 @@ class AppInfoViewModel(
             catch (error: Exception) { analytics.networkFailure(NetworkOperation.UPDATE, failureCategory(error), HttpClass.UNKNOWN, RecoveryResult.FAILED); detailMutable.value = ReleaseHistoryUiState(error = failureFeedback(error, FailureOperation.UPDATE).text, hasMore = false) }
         }
     }
+
     init {
         checkForUpdates()
-        if (installer != null) viewModelScope.launch {
-            while (true) {
-                if (!installBusy) try {
-                    val state = installer.refresh()
-                    mutable.value = mutable.value.copy(install = state.copy(error = state.error ?: mutable.value.install.error))
-                } catch (_: CancellationException) { throw CancellationException() }
-                catch (_: Exception) { mutable.value = mutable.value.copy(install = InstallState(error = "无法读取更新任务，请重试")) }
-                delay(1000)
-            }
+        installer?.let { native ->
+            viewModelScope.launch { native.state.collect { install -> mutable.value = mutable.value.copy(install = install) } }
+            viewModelScope.launch { runCatching { native.refresh() } }
         }
     }
 
@@ -88,39 +95,49 @@ class AppInfoViewModel(
         }
     }
 
+    /** The Activity resumed: a permission change or a finished system install may have advanced the task. */
+    fun onUpdateResumed() {
+        val native = installer ?: return
+        viewModelScope.launch { runCatching { native.refresh() } }
+    }
+
+    /** One-shot settings or system-confirmation intent, consumed by the Activity. */
+    fun takeUpdateLaunchIntent(): Intent? = installer?.takeLaunchIntent()
+
+    /** Puts a one-shot intent back when the Activity could not launch it. */
+    fun restoreUpdateLaunchIntent(intent: Intent) = installer?.restoreLaunchIntent(intent)
+
     fun installUpdate() {
         val release = mutable.value.release?.takeIf { mutable.value.hasUpdate } ?: return
         val native = installer ?: return
-        installTask { native.start(release); native.refresh() }
+        installTask { native.start(release) }
     }
 
     fun continueInstall(launch: (Intent) -> Unit) {
         val native = installer ?: return
         installTask {
-            mutable.value = mutable.value.copy(install = InstallState(InstallPhase.VERIFYING))
-            val intent = native.installIntent()
-            launch(intent)
-            native.refresh()
+            native.continueInstall()
+            native.takeLaunchIntent()?.let(launch)
         }
     }
 
     fun cancelInstall() {
         val native = installer ?: return
-        installTask { native.cancel(); InstallState() }
+        installTask { native.cancel() }
     }
 
-    private fun installTask(block: suspend () -> InstallState) {
+    /**
+     * The installer's StateFlow is the only writer of install state; these calls just trigger it.
+     * Copying the returned snapshot here would race with newer emissions.
+     */
+    private fun installTask(block: suspend () -> Unit) {
         if (installBusy) return
         installBusy = true
         viewModelScope.launch {
-            try { mutable.value = mutable.value.copy(install = block()) }
+            try { block() }
             catch (error: CancellationException) { throw error }
             catch (error: Exception) {
-                val previous = mutable.value.install
-                // Leave a downloaded task cancellable and retryable after a validation/intent failure.
-                val phase = if (previous.phase == InstallPhase.VERIFYING) InstallPhase.AWAITING_CONFIRMATION else previous.phase
-                mutable.value = mutable.value.copy(install = previous.copy(phase = phase,
-                    error = installationError(error)))
+                mutable.value = mutable.value.copy(install = mutable.value.install.copy(error = installationError(error)))
             } finally { installBusy = false }
         }
     }

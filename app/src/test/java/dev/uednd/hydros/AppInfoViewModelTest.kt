@@ -63,13 +63,17 @@ class AppInfoViewModelTest {
         try {
             var starts = 0
             val installer = object : AppInstaller {
+                override val state: kotlinx.coroutines.flow.StateFlow<InstallState> =
+                    kotlinx.coroutines.flow.MutableStateFlow(InstallState())
                 override suspend fun refresh() = InstallState()
                 override suspend fun start(release: AppRelease): InstallState {
                     starts++
                     throw java.io.IOException("raw diagnostic must stay private")
                 }
-                override suspend fun installIntent(): android.content.Intent = throw InstallFailure(InstallIssue.MISSING_FILE)
+                override suspend fun continueInstall() = InstallState()
                 override suspend fun cancel() = Unit
+                override fun takeLaunchIntent(): android.content.Intent? = null
+                override fun restoreLaunchIntent(intent: android.content.Intent) = Unit
             }
             val model = AppInfoViewModel(AppUpdateSource { AppRelease("9.0.0", "v9.0.0", "") }, installer)
             models.put("updates", model)
@@ -80,6 +84,37 @@ class AppInfoViewModelTest {
             assertFalse(model.updates.value.install.error!!.contains("raw"))
             model.installUpdate(); runCurrent()
             assertEquals(2, starts)
+        } finally { models.clear(); runCurrent(); Dispatchers.resetMain() }
+    }
+
+    @Test fun installerStateResumeAndPendingIntentFlowThroughTheViewModel() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val models = androidx.lifecycle.ViewModelStore()
+        try {
+            var refreshes = 0
+            val emitted = kotlinx.coroutines.flow.MutableStateFlow(InstallState())
+            val pending = android.content.Intent("dev.uednd.hydros.test.LAUNCH")
+            val installer = object : AppInstaller {
+                override val state: kotlinx.coroutines.flow.StateFlow<InstallState> = emitted
+                override suspend fun refresh(): InstallState { refreshes++; return emitted.value }
+                override suspend fun start(release: AppRelease) = InstallState(InstallPhase.DOWNLOADING, 0, canCancel = true)
+                override suspend fun continueInstall() = InstallState(InstallPhase.AWAITING_PERMISSION)
+                override suspend fun cancel() = Unit
+                override fun takeLaunchIntent() = pending
+                override fun restoreLaunchIntent(intent: android.content.Intent) = Unit
+            }
+            val model = AppInfoViewModel(AppUpdateSource { null }, installer)
+            models.put("updates", model)
+            runCurrent()
+            assertEquals(1, refreshes)
+            val launched = mutableListOf<android.content.Intent>()
+            model.continueInstall(launched::add); runCurrent()
+            assertEquals(1, launched.size)
+            emitted.value = InstallState(InstallPhase.INSTALLING, canCancel = false); runCurrent()
+            assertEquals(InstallPhase.INSTALLING, model.updates.value.install.phase)
+            assertFalse(model.updates.value.install.canCancel)
+            model.onUpdateResumed(); runCurrent()
+            assertEquals(2, refreshes)
         } finally { models.clear(); runCurrent(); Dispatchers.resetMain() }
     }
 
