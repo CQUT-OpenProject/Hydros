@@ -56,13 +56,26 @@ class SoftwareUpdateScreenTest {
         screenshot("available-dark")
         ui.runOnIdle { theme = ThemeMode.LIGHT }
         ui.onNodeWithText("立即安装更新").performScrollTo().performClick(); assertEquals(1, installs)
-        ui.runOnIdle { state = state.copy(install = InstallState(InstallPhase.DOWNLOADING, 42)) }
+        ui.runOnIdle { state = state.copy(install = InstallState(InstallPhase.DOWNLOADING, 42, canCancel = true)) }
         ui.onNodeWithText("42%").performScrollTo().assertIsDisplayed()
         ui.onNodeWithText("继续安装").assertDoesNotExist()
         ui.onNodeWithText("取消更新").performScrollTo().performClick(); assertEquals(1, cancels)
         ui.runOnIdle { state = state.copy(install = InstallState(InstallPhase.AWAITING_PERMISSION)) }
-        ui.onNodeWithText("继续安装").performScrollTo().performClick(); assertEquals(1, continues)
+        ui.onNodeWithText("去允许安装").performScrollTo().performClick(); assertEquals(1, continues)
         screenshot("permission-light")
+        ui.runOnIdle { state = state.copy(install = InstallState(InstallPhase.AWAITING_CONFIRMATION, canCancel = true)) }
+        ui.onNodeWithText("取消更新").performScrollTo().assertIsDisplayed()
+        ui.onNodeWithText("继续安装").performScrollTo().performClick(); assertEquals(2, continues)
+        ui.runOnIdle { state = state.copy(install = InstallState(InstallPhase.INSTALLING)) }
+        ui.onNodeWithText("正在安装更新…").performScrollTo().assertIsDisplayed()
+        ui.onNodeWithText("继续安装").assertDoesNotExist()
+        ui.onNodeWithText("取消更新").assertDoesNotExist()
+        // A failed install stays retryable without the ambiguous continuation button.
+        ui.runOnIdle { state = state.copy(install = InstallState(error = "安装失败，请重试或检查系统限制")) }
+        ui.onNodeWithText("安装失败，请重试或检查系统限制").performScrollTo().assertIsDisplayed()
+        ui.onNodeWithText("立即安装更新").performScrollTo().assertIsDisplayed()
+        ui.onNodeWithText("继续安装").assertDoesNotExist()
+        ui.onNodeWithText("取消更新").assertDoesNotExist()
     }
 
     @Test fun historyShowsVersionAndDetailUsesMarkdown() {

@@ -68,10 +68,12 @@ fun SoftwareUpdateScreen(
                                 else LinearProgressIndicator(Modifier.fillMaxWidth())
                             }
                         }
-                        if (install.phase in listOf(InstallPhase.AWAITING_PERMISSION, InstallPhase.AWAITING_CONFIRMATION)) {
-                            PrimaryAction("继续安装", onClick = onContinue)
+                        when (install.phase) {
+                            InstallPhase.AWAITING_PERMISSION -> PrimaryAction("去允许安装", onClick = onContinue)
+                            InstallPhase.AWAITING_CONFIRMATION -> PrimaryAction("继续安装", onClick = onContinue)
+                            else -> Unit
                         }
-                        if (install.phase != InstallPhase.VERIFYING) SecondaryAction("取消更新", onClick = onCancel)
+                        if (install.canCancel) SecondaryAction("取消更新", onClick = onCancel)
                     } else if (release?.installAsset(Build.SUPPORTED_ABIS.toList()) != null) {
                         PrimaryAction("立即安装更新", icon = R.drawable.ic_download, onClick = onInstall)
                     } else {

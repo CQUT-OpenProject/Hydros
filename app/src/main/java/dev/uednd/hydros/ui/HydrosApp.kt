@@ -95,9 +95,10 @@ private fun appInfoViewModel(): AppInfoViewModel {
     val context = LocalContext.current.applicationContext
     val app = context as HydrosApplication
     val source = app.appUpdates
-    return viewModel(factory = remember(source) { object : ViewModelProvider.Factory {
+    val installer = app.appInstaller
+    return viewModel(factory = remember(source, installer) { object : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T = AppInfoViewModel(source, dev.uednd.hydros.data.update.AndroidAppInstaller(context), app.dependencies.analytics) as T
+        override fun <T : ViewModel> create(modelClass: Class<T>): T = AppInfoViewModel(source, installer, app.dependencies.analytics) as T
     } })
 }
 
@@ -107,7 +108,6 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
     val updates by appInfo.updates.collectAsStateWithLifecycle()
     val history by appInfo.history.collectAsStateWithLifecycle()
     val detail by appInfo.detail.collectAsStateWithLifecycle()
-    val installLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
     val nav = rememberNavController()
     val pageState = rememberPagerState(pageCount = { 2 })
     val navigationScope = rememberCoroutineScope()
@@ -118,6 +118,13 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
     val privacy = rememberMarkdownState(LegalDocuments.PRIVACY_POLICY)
     val context=LocalContext.current
     val appData = (context.applicationContext as HydrosApplication).appData
+    // The installer exposes at most one pending settings/confirmation intent; launch it as the
+    // system would after a silent commit so the user never has to find the right button.
+    LaunchedEffect(updates.install.phase, updates.install.error) {
+        appInfo.takeUpdateLaunchIntent()?.let { intent ->
+            if (runCatching { context.startActivity(intent) }.isFailure) appInfo.restoreUpdateLaunchIntent(intent)
+        }
+    }
     val snackbar = remember { HydrosSnackbarState() }
     var permissionTarget by remember { mutableStateOf<DeviceUi?>(null) }
     fun bluetoothGranted() = listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT).all {
@@ -206,12 +213,13 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
         if (!state.signedIn || entry?.destination?.route != "device/{id}" ||
             permissionTarget?.id != entry?.arguments?.getString("id")) permissionTarget = null
     }
-    DisposableEffect(lifecycleOwner, nav, model) {
+    DisposableEffect(lifecycleOwner, nav, model, appInfo) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 val current = nav.currentBackStackEntry
                 val deviceId = current?.arguments?.getString("id")
                 model.recoverQueries(deviceId.takeIf { current?.destination?.route == "bill/{id}" })
+                appInfo.onUpdateResumed()
                 if (bluetoothGranted() && current?.destination?.route == "device/{id}" && deviceId != null) {
                     val pending = permissionTarget?.takeIf { it.id == deviceId }
                     if (pending != null) { permissionTarget = null; model.connect(pending) }
@@ -380,7 +388,9 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                                 LaunchedEffect(Unit) { appInfo.checkForUpdates() }
                                 SoftwareUpdateScreen(updates, onHistory = { openPage("about/releases") },
                                     onInstall = appInfo::installUpdate,
-                                    onContinue = { appInfo.continueInstall { installLauncher.launch(it) } },
+                                    onContinue = { appInfo.continueInstall { intent ->
+                                        if (runCatching { context.startActivity(intent) }.isFailure) appInfo.restoreUpdateLaunchIntent(intent)
+                                    } },
                                     onCancel = appInfo::cancelInstall, onCheck = appInfo::checkForUpdates)
                             }
                         }
