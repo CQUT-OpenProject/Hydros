@@ -21,8 +21,10 @@ import dev.uednd.hydros.data.storage.PreferencesHydrosStore
 import dev.uednd.hydros.data.storage.AppDataControl
 import dev.uednd.hydros.data.storage.AndroidAppDataControl
 import dev.uednd.hydros.service.SessionWatchService
+import dev.uednd.hydros.data.update.AppInstaller
 import dev.uednd.hydros.data.update.AppUpdateSource
 import dev.uednd.hydros.data.update.GitHubAppUpdates
+import dev.uednd.hydros.data.update.AndroidUpdateManager
 import dev.uednd.hydros.data.analytics.AnalyticsTracker
 import dev.uednd.hydros.data.analytics.FirebaseAnalyticsTracker
 import dev.uednd.hydros.data.analytics.NoOpAnalyticsTracker
@@ -61,6 +63,7 @@ open class HydrosApplication : Application(), CameraXConfig.Provider {
     lateinit var dependencies: HydrosDependencies
         internal set
     open val appUpdates: AppUpdateSource by lazy { GitHubAppUpdates() }
+    open val appInstaller: AppInstaller by lazy { AndroidUpdateManager.get(this) }
     open val appData: AppDataControl by lazy { AndroidAppDataControl(this) }
 
     override fun getCameraXConfig(): CameraXConfig =
