@@ -39,6 +39,9 @@ class MemoryStore : HydrosStore {
     var analytics = false
     override suspend fun analyticsEnabled() = analytics
     override suspend fun analyticsEnabled(value: Boolean) { analytics = value }
+    var forceBluetooth = false
+    override suspend fun forceBluetoothConnection() = forceBluetooth
+    override suspend fun forceBluetoothConnection(value: Boolean) { forceBluetooth = value }
 }
 class ScriptTransport : CampusTransport {
     val requests=mutableListOf<Pair<String,Map<String,String>>>()
@@ -165,6 +168,27 @@ class SessionRepositoryTest {
         val ready=RealDeviceRepository(t,s,b,Mutex()).prepare(auth,device(ControlChannel.UNKNOWN))
         assertEquals(ControlChannel.CLOUD,ready.channel)
         assertEquals(DeviceStatus.OFFLINE,ready.status)
+    }
+    @Test fun forceBluetoothConnectionSkipsCloudStatusQuery() = runTest {
+        val store = MemoryStore().apply { forceBluetooth = true }
+        val transport = ScriptTransport()
+        transport.script = { path, _ ->
+            if (path == "device/info/mac") {
+                response("""{"deviceId":7,"deviceName":"热水表-宿舍","snCode":"AABBCCDDEEFF","macAddress":"AABBCCDDEEFF","smallTypeId":1,"onlineStatusId":1}""")
+            } else response()
+        }
+        val ready = RealDeviceRepository(transport, store, ScriptBle(), Mutex()).prepare(auth, device(ControlChannel.UNKNOWN))
+        assertEquals(ControlChannel.BLE, ready.channel)
+        assertFalse(transport.requests.any { it.first == "order/tcpDevice/query/rateOrder/using" })
+    }
+    @Test fun forceBluetoothConnectionRejectsCloudStart() = runTest {
+        val store = MemoryStore().apply { forceBluetooth = true }
+        val transport = ScriptTransport()
+        val repo = repo(transport, store, ScriptBle())
+        val failure = runCatching { repo.start(auth, device(ControlChannel.CLOUD)) }.exceptionOrNull()
+        assertTrue(failure is ApiFailure)
+        assertEquals("已启用强制蓝牙连接，请重新连接设备", failure?.message)
+        assertTrue(transport.requests.none { it.first == "order/tcpDevice/downRate/rateOrder" })
     }
     @Test fun cloudSettlementSupportsDecimalConsumeMoney()=runTest {
         val t=ScriptTransport(); val s=MemoryStore(); val r=repo(t,s,ScriptBle())

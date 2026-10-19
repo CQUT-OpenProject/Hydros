@@ -404,6 +404,7 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                                     onProjectLicense = { openPage("about/licenses/project") },
                                     onTerms = { openPage("legal/terms") },
                                     onPrivacy = { openPage("legal/privacy") },
+                                    onDeveloper = { openPage("about/developer") },
                                     appData = appData,
                                     onClear = { model.clearAllData(appData::clearAllData) },
                                     analyticsEnabled = state.analyticsEnabled,
@@ -434,6 +435,15 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                             HydrosPage(detail.releases.firstOrNull()?.name ?: tag, onBack = { back() }) {
                                 detail.releases.firstOrNull()?.let { ReleaseDetailScreen(it) }
                                     ?: ReleaseHistoryScreen(detail, onRelease = {}, onLoad = { appInfo.loadRelease(tag) })
+                            }
+                        }
+                        composable("about/developer") {
+                            HydrosPage("开发者页面", onBack = { back() }) {
+                                DeveloperScreen(
+                                    forceBluetoothConnection = state.forceBluetoothConnection,
+                                    forceBluetoothEnabled = state.session == null && !state.working,
+                                    onForceBluetoothConnection = model::setForceBluetoothConnection,
+                                )
                             }
                         }
                         composable("about/licenses") {

@@ -429,6 +429,19 @@ class HydrosFlowTest {
         ui.onNodeWithContentDescription("返回").performClick()
         ui.onNodeWithText("构建时间").assertExists()
     }
+
+    @Test fun aboutBuildTimeOpensDeveloperPage() {
+        open(); click("我的"); click("关于 Hydros"); waitFor("构建时间")
+        repeat(5) { ui.onNodeWithText("构建时间").performClick() }
+        waitFor("开发者页面")
+        ui.onNodeWithText("强制蓝牙连接").assertExists()
+        ui.onNodeWithTag("developer-force-bluetooth").assertIsOff()
+        ui.onNodeWithContentDescription("返回").performClick()
+        waitFor("关于 Hydros")
+        repeat(5) { ui.onNodeWithText("构建时间").performClick() }
+        waitFor("开发者页面")
+    }
+
     private fun appData() =
         (androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as OfflineTestApplication).appData
 

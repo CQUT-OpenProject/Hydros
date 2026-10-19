@@ -79,7 +79,8 @@ class DevicePreparation(
                     mutable.value = DevicePreparationState()
                     return@launch
                 }
-                val ready = devices.prepare(credentials, device, preferBle = forceBle)
+                val preferBle = forceBle || store.forceBluetoothConnection()
+                val ready = devices.prepare(credentials, device, preferBle = preferBle)
                 val saved = store.account(credentials.key)
                 ensureActive()
                 if (attempt !== next || auth.credentials.value != credentials) return@launch

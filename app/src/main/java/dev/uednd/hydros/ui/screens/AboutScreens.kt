@@ -41,6 +41,8 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
+private const val DEVELOPER_PAGE_TAP_COUNT = 5
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(
@@ -50,11 +52,24 @@ fun AboutScreen(
     onProjectLicense: () -> Unit,
     onTerms: () -> Unit,
     onPrivacy: () -> Unit,
+    onDeveloper: () -> Unit,
     appData: AppDataControl,
     onClear: () -> Boolean,
     analyticsEnabled: Boolean,
     onAnalyticsEnabled: (Boolean) -> Unit
 ) {
+    val snackbar = LocalHydrosSnackbar.current
+    var developerPageTapCount by remember { mutableIntStateOf(0) }
+    fun onBuildTimeClickForDeveloperPage() {
+        developerPageTapCount += 1
+        if (developerPageTapCount >= DEVELOPER_PAGE_TAP_COUNT) {
+            developerPageTapCount = 0
+            snackbar.notice.value?.let { snackbar.dismiss(it.id) }
+            onDeveloper()
+        } else if (developerPageTapCount >= (DEVELOPER_PAGE_TAP_COUNT + 1) / 2) {
+            snackbar.show("再按 ${DEVELOPER_PAGE_TAP_COUNT - developerPageTapCount} 次进入开发者页面")
+        }
+    }
     var dataBytes by remember { mutableStateOf<Long?>(null) }
     var clearDialog by remember { mutableStateOf(false) }
     var clearing by remember { mutableStateOf(false) }
@@ -70,7 +85,8 @@ fun AboutScreen(
                 tone = IconTone.PRIMARY, onClick = onUpdates,
                 trailing = if (updates.hasUpdate) ({ StatusBadge("有新版本！") }) else null)
             SubtleDivider()
-            MineRow("构建时间", supporting = buildTime, icon = R.drawable.ic_clock, tone = IconTone.SECONDARY)
+            MineRow("构建时间", supporting = buildTime, icon = R.drawable.ic_clock, tone = IconTone.SECONDARY,
+                onClick = { onBuildTimeClickForDeveloperPage() })
         }
         Section("存储占用情况") {
             MineRow("清除所有数据", supporting = dataBytes?.let { "当前占用 ${formatDataSize(it)}" }.orEmpty(),
@@ -113,6 +129,25 @@ private fun formatDataSize(bytes: Long): String = when {
     bytes >= 1024L * 1024 -> String.format(Locale.CHINA, "%.1f MB", bytes / (1024.0 * 1024))
     bytes >= 1024 -> String.format(Locale.CHINA, "%.1f KB", bytes / 1024.0)
     else -> "$bytes B"
+}
+
+@Composable
+fun DeveloperScreen(
+    forceBluetoothConnection: Boolean,
+    forceBluetoothEnabled: Boolean,
+    onForceBluetoothConnection: (Boolean) -> Unit,
+) {
+    PageColumn {
+        Section("连接") {
+            SwitchRow(
+                title = "强制蓝牙连接",
+                checked = forceBluetoothConnection,
+                enabled = forceBluetoothEnabled,
+                switchTag = "developer-force-bluetooth",
+                onCheckedChange = onForceBluetoothConnection,
+            )
+        }
+    }
 }
 
 @Composable

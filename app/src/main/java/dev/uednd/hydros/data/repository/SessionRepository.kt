@@ -110,6 +110,9 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
     override suspend fun start(auth: Credentials, device: DeviceUi) = operation.withLock {
         if(current.value != null || store.account(auth.key).session != null) throw ApiFailure(null, "请先处理当前会话")
         if(device.channel == ControlChannel.UNKNOWN) throw ApiFailure(null, "请先核实设备连接")
+        if (store.forceBluetoothConnection() && device.channel != ControlChannel.BLE) {
+            throw ApiFailure(null, "已启用强制蓝牙连接，请重新连接设备")
+        }
         if(device.channel == ControlChannel.BLE) startBle(auth, device) else startCloud(auth, device)
     }
     private suspend fun startCloud(auth: Credentials, device: DeviceUi) {
