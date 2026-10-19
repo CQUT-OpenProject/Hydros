@@ -186,7 +186,8 @@ fun DangerAction(
             disabledContainerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
             disabledContentColor = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.4f)
         ),
-        modifier = modifier.fillMaxWidth().heightIn(min = 44.dp).semantics {
+        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp),
+        modifier = modifier.fillMaxWidth().heightIn(min = 52.dp).semantics {
             if (loading) stateDescription = "正在进行"
             else if (disabledReason != null) stateDescription = disabledReason
         }
