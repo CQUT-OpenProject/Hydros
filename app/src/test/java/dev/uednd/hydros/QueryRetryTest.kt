@@ -41,7 +41,7 @@ class QueryRetryTest {
         } } }
         assertTrue(result.exceptionOrNull() is SocketTimeoutException)
         assertTrue(cancelled)
-        assertEquals(15_000L, testScheduler.currentTime)
+        assertEquals(READ_QUERY_RECOVERY_MILLIS, testScheduler.currentTime)
     }
 
     @Test fun cancellationDuringBackoffDoesNotSendAnotherRequest() = runTest {

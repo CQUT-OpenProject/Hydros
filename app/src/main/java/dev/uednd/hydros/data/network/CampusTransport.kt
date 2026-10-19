@@ -47,7 +47,10 @@ class HttpCampusTransport(private val api: CampusApi, private val isCurrent: (Cr
                 }
                 if (budget == null) send() else budget.attempt(send)
             }
-            return recovery?.execute(api, path, post, request, canFallback = { budget?.available != false }) ?: request(api)
+            return recovery?.execute(api, path, post, request,
+                canFallback = { budget?.available != false },
+                canArmDeadline = { budget?.fallbackRoom != false },
+                onRouteExhausted = { budget?.routeExhausted = true }) ?: request(api)
         }
         val response = if (isReadOnlyCampusRequest(path, post)) retryReadQuery { execute(it) } else execute(null)
         if (auth != null && !isCurrent(auth)) throw ApiFailure(null, "登录状态已变化", true)

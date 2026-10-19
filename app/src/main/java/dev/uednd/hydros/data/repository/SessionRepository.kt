@@ -65,9 +65,10 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
         val probe = async(start = CoroutineStart.LAZY) {
             var completed = false
             try {
-                // HTTP probes need room for default network + cellular acquisition + one retry.
+                // HTTP probes use the read recovery budget: default attempt, same-network retry,
+                // cellular acquisition, and one cellular request.
                 // A BLE connection gets its own 15-second budget; only its query gets 4 seconds.
-                withTimeoutOrNull(if (localBle) BleController.CONNECT_TIMEOUT_MS + 4_000 else 15_000) { block() }
+                withTimeoutOrNull(if (localBle) BleController.CONNECT_TIMEOUT_MS + 4_000 else READ_QUERY_RECOVERY_MILLIS) { block() }
                     .also { completed = it != null }
             } finally {
                 // A cancelled command must not leave a late reply on a reused connection.

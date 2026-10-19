@@ -21,12 +21,19 @@ internal fun isReadOnlyCampusRequest(path: String, post: Boolean): Boolean = if 
 internal class QueryHttpFailure(val status: Int, val retryAfterMillis: Long? = null) : ApiFailure(status, "HTTP query rejected")
 internal fun transientHttpStatus(status: Int): Boolean = status in setOf(408, 429, 502, 503, 504)
 
+internal const val READ_ROUTE_DEADLINE_MILLIS = 10_000L
+/** Default attempt, same-network retry, cellular acquisition, and one cellular attempt. */
+internal const val READ_QUERY_RECOVERY_MILLIS = 24_000L
+
 /** One budget counts every actual request, including Wi-Fi-to-cellular fallback. No nested retry multiplication. */
 internal class QueryRetryBudget(private val limit: Int = 3) {
     var attempts: Int = 0
         private set
     private var lastFailure: Exception? = null
+    var routeExhausted: Boolean = false
     val available: Boolean get() = attempts < limit
+    /** True when this attempt can still be followed by a cellular request. */
+    val fallbackRoom: Boolean get() = attempts < limit - 1
 
     suspend fun <T> attempt(block: suspend () -> T): T {
         if (!available) throw checkNotNull(lastFailure)
@@ -36,7 +43,11 @@ internal class QueryRetryBudget(private val limit: Int = 3) {
         catch (error: Exception) { lastFailure = error; throw error }
     }
 }
-private fun retryDelay(error: Exception, attempts: Int): Long? = when (error) {
+private fun retryDelay(error: Exception, attempts: Int, routeExhausted: Boolean = false): Long? = when {
+    routeExhausted -> null
+    else -> retryDelayFor(error, attempts)
+}
+private fun retryDelayFor(error: Exception, attempts: Int): Long? = when (error) {
     is QueryHttpFailure -> when {
         !transientHttpStatus(error.status) -> null
         error.status == 429 && error.retryAfterMillis == null -> null
@@ -55,14 +66,14 @@ private data class QueryResult<T>(val value: T)
 /** Only callers that have positively identified a read may use this policy. */
 internal suspend fun <T> retryReadQuery(block: suspend (QueryRetryBudget) -> T): T {
     val budget = QueryRetryBudget()
-    val result = withTimeoutOrNull<QueryResult<T>>(15_000) {
+    val result = withTimeoutOrNull<QueryResult<T>>(READ_QUERY_RECOVERY_MILLIS) {
         var rounds = 0
         while (true) {
             rounds++
             try { return@withTimeoutOrNull QueryResult(block(budget)) }
             catch (error: CancellationException) { throw error }
             catch (error: Exception) {
-                val backoff = retryDelay(error, budget.attempts.coerceAtLeast(1))
+                val backoff = retryDelay(error, budget.attempts.coerceAtLeast(1), budget.routeExhausted)
                 if (rounds >= 3 || !budget.available || backoff == null) throw error
                 delay(backoff)
             }
