@@ -58,6 +58,16 @@ fun sessionActionLabel(value: SessionUi): String = when (value.stage) {
     else -> "点击以结束使用"
 }
 
+private const val SESSION_OBSERVATION_UNAVAILABLE = "暂时无法确认设备状态，请检查水流并恢复连接"
+
+fun sessionObservationNotice(session: SessionUi?, observation: SessionObservation, spinning: Boolean): String? {
+    if (session == null || spinning) return null
+    val matching = observation.deviceId == session.device.id && observation.startedAt == session.startedAt
+    if (!matching) return null
+    return observation.actionError?.takeIf { it != session.message }
+        ?: if (observation.unavailable) SESSION_OBSERVATION_UNAVAILABLE else null
+}
+
 fun sessionNotificationText(value: SessionUi?, observation: SessionObservation): String {
     if (value == null) return "正在准备设备会话"
     val matching = observation.deviceId == value.device.id && observation.startedAt == value.startedAt

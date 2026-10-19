@@ -174,16 +174,7 @@ fun SessionScreen(session: SessionUi?, onFinish: () -> Unit, onHome: () -> Unit,
         }
     }
     val spinning = session != null && (working || session.stage in listOf(SessionStage.OPENING, SessionStage.STOPPING, SessionStage.SETTLING))
-    val observed = session != null && observation.deviceId == session.device.id && observation.startedAt == session.startedAt
-    val confirmedAt = observation.lastConfirmedAt?.let {
-        "上次确认：" + java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.CHINA).format(java.util.Date(it))
-    }
-    val observationNotice = if (session != null && !spinning && observed) {
-        observation.actionError?.takeIf { it != session.message } ?: if (observation.unavailable) {
-            if (observation.lastConfirmedAt == null) "暂时无法确认设备状态，请检查水流并恢复连接。本次启动后尚未成功核实设备状态"
-            else "暂时无法确认设备状态，请检查水流并恢复连接"
-        } else null
-    } else null
+    val observationNotice = sessionObservationNotice(session, observation, spinning)
     SnackbarMessage(observationNotice, eventKey = Triple(session?.device?.id, session?.startedAt, observationNotice), error = false, source = "device", severity = FeedbackSeverity.WARNING)
     when {
         session == null && resolvingDestination -> SpinningTransition(title = "正在打开账单", description = "正在获取本次使用对应的账单…")
@@ -211,7 +202,6 @@ fun SessionScreen(session: SessionUi?, onFinish: () -> Unit, onHome: () -> Unit,
                     Text(if (session.stage == SessionStage.USING) "正在${session.device.category.label}" else session.stage.label, style = MaterialTheme.typography.titleLarge)
                     Text(elapsed(seconds), style = MaterialTheme.typography.headlineLarge)
                     Text("使用时长", style = MaterialTheme.typography.bodySmall)
-                    if (observed && confirmedAt != null) Text(confirmedAt, style = MaterialTheme.typography.bodySmall)
                 }
             }
             Section("当前设备") {

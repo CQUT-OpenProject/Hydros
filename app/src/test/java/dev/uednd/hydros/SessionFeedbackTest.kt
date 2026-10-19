@@ -35,6 +35,18 @@ class SessionFeedbackTest {
         assertEquals("重试关闭", sessionActionLabel(value))
     }
 
+    @Test fun observationNoticeUsesUnavailableCopyAndSkipsDuplicateActionError() {
+        val session = SessionUi(device, "owner", stage = SessionStage.USING)
+        val observation = SessionObservation(device.id, session.startedAt, unavailable = true)
+        assertEquals("暂时无法确认设备状态，请检查水流并恢复连接", sessionObservationNotice(session, observation, spinning = false))
+        assertNull(sessionObservationNotice(session, observation, spinning = true))
+        assertNull(sessionObservationNotice(session, SessionObservation("other", session.startedAt, unavailable = true), spinning = false))
+        val pending = SessionUi(device, "owner", stage = SessionStage.OPEN_UNCONFIRMED, recoveryReason = SessionRecoveryReason.NETWORK)
+        val shared = pending.message!!
+        assertNull(sessionObservationNotice(pending, SessionObservation(device.id, pending.startedAt, actionError = shared), spinning = false))
+        assertEquals("独立错误", sessionObservationNotice(pending, SessionObservation(device.id, pending.startedAt, actionError = "独立错误"), spinning = false))
+    }
+
     @Test fun timeoutAdviceRespectsTransportAndPermissionSurvivesSettlement() {
         val network = dev.uednd.hydros.data.feedback.AppFailure(dev.uednd.hydros.data.feedback.FailureOperation.START,
             dev.uednd.hydros.data.feedback.FailureStage.NETWORK, dev.uednd.hydros.data.feedback.FailureReason.TIMEOUT)
