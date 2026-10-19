@@ -8,6 +8,7 @@ import android.net.NetworkRequest
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.ConnectionPool
+import java.net.Proxy
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resumeWithException
 
@@ -50,6 +51,7 @@ class AndroidNetworkAccess(context: Context, private val baseUrl: String) : Netw
                 if (!completed.compareAndSet(false, true)) return
                 val client = CampusApiFactory.client().newBuilder()
                     .socketFactory(network.socketFactory)
+                    .proxy(Proxy.NO_PROXY)
                     .dns { host -> network.getAllByName(host).toList() }
                     .connectionPool(ConnectionPool())
                     .build()
@@ -66,7 +68,12 @@ class AndroidNetworkAccess(context: Context, private val baseUrl: String) : Netw
                 continuation.resume(lease) { _, value, _ -> value.close() }
             }
             override fun onUnavailable() = unavailable()
-            override fun onLost(network: Network) = unavailable()
+            override fun onLost(network: Network) {
+                // A candidate can be withdrawn before validation. Keep waiting for another
+                // network, onUnavailable, or the request timeout. A delivered network that
+                // disappears fails through its own socket.
+                if (completed.get()) return
+            }
         }
         val request = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
