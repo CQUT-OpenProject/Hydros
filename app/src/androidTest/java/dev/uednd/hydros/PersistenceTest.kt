@@ -40,6 +40,19 @@ class PersistenceTest {
             first.credentials(null); first.theme("SYSTEM"); first.updateAccount(auth.key) { SavedAccount() }
         }
     }
+    @Test fun postSessionDestinationSurvivesStoreRestartAndResetsToDevice()=runBlocking {
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        val writer=PreferencesHydrosStore(context)
+        try {
+            writer.postSessionDestination(PostSessionDestination.BILL)
+            // A fresh facade reads the same DataStore entry, as the app does after a process restart.
+            assertEquals(PostSessionDestination.BILL,PreferencesHydrosStore(context).postSessionDestination())
+            assertEquals(PostSessionDestination.BILL,writer.postSessionDestination())
+        } finally {
+            writer.postSessionDestination(PostSessionDestination.DEVICE)
+        }
+        assertEquals(PostSessionDestination.DEVICE,PreferencesHydrosStore(context).postSessionDestination())
+    }
     @Test fun concurrentStoreFacadesDoNotLoseAccountUpdates()=runBlocking {
         val context=InstrumentationRegistry.getInstrumentation().targetContext
         val a=PreferencesHydrosStore(context); val b=PreferencesHydrosStore(context); val key="test-concurrency"

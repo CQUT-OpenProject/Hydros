@@ -51,6 +51,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModel
 import androidx.compose.ui.platform.LocalContext
 import dev.uednd.hydros.data.HydrosApplication
+import dev.uednd.hydros.data.storage.PostSessionDestination
 import android.os.Build
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -152,7 +153,20 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
         if (!state.signedIn && destination != "session" && !destination.startsWith("legal/")) return
         nav.navigate(destination)
     }
-    fun back() { if (state.reauthentication == null) nav.popBackStack() }
+    var handledSession by rememberSaveable { mutableStateOf<String?>(null) }
+    var billFromSession by rememberSaveable { mutableStateOf(false) }
+    fun dismissSessionScreen() {
+        if (state.session == null) {
+            handledSession = null
+            model.dismissPostSessionNavigation()
+        }
+    }
+    fun back() {
+        if (state.reauthentication == null) {
+            if (nav.currentDestination?.route == "session") dismissSessionScreen()
+            nav.popBackStack()
+        }
+    }
     val permission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         if (!it) snackbar.show("未开启通知权限，后台设备通知可能无法显示")
     }
@@ -188,9 +202,9 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
         }
     }
     BackHandler(state.reauthentication != null) { }
-    var handledSession by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(state.initializing, state.session?.device?.id, state.session?.startedAt, state.session?.stage,
-        state.working, state.reauthentication, state.signedIn) {
+        state.working, state.reauthentication, state.signedIn,
+        state.resolvingPostSessionDestination, state.postSessionBillId) {
         if(!state.initializing && state.signedIn && state.reauthentication == null) {
             // The durable opening intent may still receive an explicit rejection (and prepare BLE).
             // Keep its preparation owner alive until an outcome or recovery state is available.
@@ -199,9 +213,19 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
             if(sessionId != null && sessionId != handledSession) {
                 handledSession=sessionId; nav.navigate("session") { launchSingleTop=true }
             } else if(sessionId == null && handledSession != null && state.signedIn) {
+                // The end-use destination may still be resolving a matching bill.
+                if (state.resolvingPostSessionDestination) return@LaunchedEffect
                 handledSession=null
+                val billId=state.postSessionBillId
                 pageState.requestScrollToPage(0)
-                nav.navigate("home") { popUpTo("home"); launchSingleTop=true }
+                if(billId != null) {
+                    model.consumePostSessionBill(); billFromSession=true
+                    nav.navigate("bill/$billId") { popUpTo("home"); launchSingleTop=true }
+                } else {
+                    if (state.postSessionDestination == PostSessionDestination.BILL)
+                        snackbar.show("未找到本次账单，已返回设备页")
+                    nav.navigate("home") { popUpTo("home"); launchSingleTop=true }
+                }
             }
         }
     }
@@ -334,7 +358,7 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                                         if (page == 0) HomeScreen(state, onScan = { openPage("scan") }, onDevice = { openPage("device/$it") },
                                             onSession = { openPage("session") },
                                             onScanNearby = model::discoverNearby, onStopNearby = model::stopDiscovery)
-                                        else WalletScreen(state, onMonth = model::loadMonth, onBillType = model::selectBillType, onRefresh = model::refresh, onBill = { openPage("bill/$it") })
+                                        else WalletScreen(state, onMonth = model::loadMonth, onBillType = model::selectBillType, onRefresh = model::refresh, onBill = { billFromSession = false; openPage("bill/$it") })
                                     }
                                 }
                             }
@@ -369,7 +393,8 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                         }
                         composable("display") {
                             HydrosPage("显示设置", onBack = { back() }) {
-                                DisplaySettingsScreen(state.fontSizeScale, onPreview = { fontSizePreview = it }, onSave = model::fontSizeScale)
+                                DisplaySettingsScreen(state.fontSizeScale, onPreview = { fontSizePreview = it }, onSave = model::fontSizeScale,
+                                    postSessionDestination = state.postSessionDestination, onPostSessionDestination = model::postSessionDestination)
                             }
                         }
                         composable("about") {
@@ -466,7 +491,11 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                         }
                         composable("session") {
                             HydrosPage("设备使用", onBack = { back() }) {
-                                SessionScreen(state.session, onFinish = model::finish, onHome = { main("home") }, remarks = state.deviceRemarks, working = state.working, observation = state.observation)
+                                SessionScreen(state.session, onFinish = model::finish, onHome = {
+                                    dismissSessionScreen()
+                                    main("home")
+                                }, remarks = state.deviceRemarks, working = state.working, observation = state.observation,
+                                    resolvingDestination = state.resolvingPostSessionDestination)
                             }
                         }
                         composable("bill/{id}") { backStack ->
@@ -475,6 +504,7 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                             HydrosPage("账单详情", onBack = { back() }) {
                                 val currentBill = state.bills.find { it.id == billId } ?: remember(billId) { state.bills.find { it.id == billId } }
                                 BillDetailScreen(currentBill, onWallet = { if (state.reauthentication == null) nav.popBackStack("home", inclusive = false) },
+                                    backLabel = if (billFromSession) "返回首页" else "返回钱包",
                                     loading = state.detailLoading && state.detailId == billId, error = state.detailError.takeIf { state.detailId == billId }, onRetry = { billId?.let(model::loadDetail) })
                             }
                         }

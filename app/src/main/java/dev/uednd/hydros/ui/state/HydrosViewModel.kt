@@ -2,6 +2,7 @@ package dev.uednd.hydros.ui.state
 
 import dev.uednd.hydros.data.feedback.*
 import dev.uednd.hydros.data.storage.FeedbackSettings
+import dev.uednd.hydros.data.storage.PostSessionDestination
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.uednd.hydros.data.HydrosDependencies
@@ -39,10 +40,13 @@ data class HydrosUiState(val initializing: Boolean = true, val signedIn: Boolean
     val walletLoading: Boolean = false, val walletLoaded: Boolean = false, val accountError: String? = null,
     val detailId: String? = null, val deviceActionError: String? = null,
     val detailLoading: Boolean = false, val detailError: String? = null,
-    val walletError: String? = null, val billsError: String? = null, val message: String? = null, val working: Boolean = false)
+    val walletError: String? = null, val billsError: String? = null, val message: String? = null, val working: Boolean = false,
+    val postSessionDestination: PostSessionDestination = PostSessionDestination.DEVICE,
+    val resolvingPostSessionDestination: Boolean = false, val postSessionBillId: String? = null)
 class HydrosViewModel(
     val graph: HydrosDependencies,
 ) : ViewModel() {
+    private var postSessionNavigationDismissed = false
     private val mutable = MutableStateFlow(HydrosUiState())
     val state = mutable.asStateFlow()
     private val refreshJobs = mutableListOf<Job>()
@@ -97,7 +101,9 @@ class HydrosViewModel(
                 graph.analytics.setCollectionEnabled(onboarding && analyticsEnabled)
                 val feedback = graph.store.feedback()
                 val fontSizeScale = graph.store.fontSizeScale()
-                mutable.update { it.copy(theme=theme, onboardingCompleted=onboarding, analyticsEnabled=analyticsEnabled, feedback=feedback, fontSizeScale=fontSizeScale) }
+                val postSessionDestination = runCatching { graph.store.postSessionDestination() }.getOrDefault(PostSessionDestination.DEVICE)
+                mutable.update { it.copy(theme=theme, onboardingCompleted=onboarding, analyticsEnabled=analyticsEnabled, feedback=feedback,
+                    fontSizeScale=fontSizeScale, postSessionDestination=postSessionDestination) }
                 graph.restore()
                 graph.auth.authState.collectLatest { authentication ->
                     val auth = authentication.credentials
@@ -118,6 +124,7 @@ class HydrosViewModel(
                         onboardingCompleted=current.onboardingCompleted, reauthentication=authentication.reauthentication,
                         analyticsEnabled=current.analyticsEnabled,
                         theme=current.theme, feedback=current.feedback, fontSizeScale=current.fontSizeScale,
+                        postSessionDestination=current.postSessionDestination,
                         account=AccountUi(phone=auth?.phone ?: ""), devices=saved?.devices ?: emptyList(),
                         connectedDeviceIds=saved?.recent ?: emptyList(), favoriteDeviceIds=saved?.favorites ?: emptySet(),
                         deviceRemarks=saved?.deviceRemarks ?: emptyMap(), session=graph.sessions.session.value) }
@@ -129,8 +136,25 @@ class HydrosViewModel(
             var prior: SessionUi? = null
             graph.sessions.session.collect { value ->
                 val auth = graph.auth.credentials.value
-                if(value == null || auth?.key == value.ownerKey || auth == null) mutable.update { it.copy(session=value) }
+                val finished = when {
+                    value != null || auth == null -> null
+                    else -> prior?.takeIf { it.ownerKey == auth.key }
+                        ?: mutable.value.session?.takeIf { it.ownerKey == auth.key }
+                }
+                if(value == null || auth?.key == value.ownerKey || auth == null) mutable.update { current -> current.copy(
+                    session=value,
+                    resolvingPostSessionDestination = if (value != null) false else current.resolvingPostSessionDestination,
+                    postSessionBillId = if (value == null) current.postSessionBillId else null) }
+                // Refresh first: the bill lookup replaces the list selection it may still be loading.
                 if(prior != null && value == null && auth != null) refresh()
+                if (finished != null) {
+                    graph.scope.launch {
+                        if (graph.store.postSessionDestination() != PostSessionDestination.BILL) return@launch
+                        postSessionNavigationDismissed = false
+                        mutable.update { it.copy(resolvingPostSessionDestination = true) }
+                        resolveFinishedBill(finished)
+                    }
+                }
                 prior = value
             }
         }
@@ -166,6 +190,23 @@ class HydrosViewModel(
         }
     }
     private fun friendly(error: Exception) = failureFeedback(error, FailureOperation.BILLS).text
+    private fun resolveFinishedBill(session: SessionUi) {
+        viewModelScope.launch {
+            val bill = try {
+                withTimeoutOrNull(8_000) { billHistory.locateSessionBill(session) }
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+            if (graph.auth.credentials.value?.key != session.ownerKey) return@launch
+            if (postSessionNavigationDismissed) {
+                mutable.update { it.copy(resolvingPostSessionDestination = false) }
+                return@launch
+            }
+            // Publish the located month together with the bill id so the detail page can render it at once.
+            val history = billHistory.state.value
+            mutable.update { it.copy(month = history.month, billType = history.type,
+                bills = history.bills, loadingBills = history.loading, billsError = history.error?.let(::friendly),
+                resolvingPostSessionDestination = false, postSessionBillId = bill?.id) }
+        }
+    }
     suspend fun acknowledgeReauthentication(id: Long) {
         graph.auth.acknowledgeReauthentication(id)
         // Restoring the device can wait on an ongoing close operation. Consume the UI notice now.
@@ -220,6 +261,15 @@ class HydrosViewModel(
         }
     }
     fun theme(mode: ThemeMode) { graph.scope.launch { action { graph.store.theme(mode.name); mutable.update { it.copy(theme=mode) } } } }
+    fun postSessionDestination(destination: PostSessionDestination) { graph.scope.launch { action {
+        graph.store.postSessionDestination(destination)
+        mutable.update { it.copy(postSessionDestination = destination) }
+    } } }
+    fun consumePostSessionBill() { mutable.update { it.copy(postSessionBillId = null) } }
+    fun dismissPostSessionNavigation() {
+        postSessionNavigationDismissed = true
+        mutable.update { it.copy(resolvingPostSessionDestination = false, postSessionBillId = null) }
+    }
     fun hapticFeedback(enabled: Boolean) = updateFeedback { it.copy(hapticFeedbackEnabled = enabled) }
     suspend fun fontSizeScale(value: Float): Boolean = action {
         graph.store.fontSizeScale(value)

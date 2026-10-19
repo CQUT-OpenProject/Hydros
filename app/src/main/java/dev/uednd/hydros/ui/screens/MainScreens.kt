@@ -168,19 +168,19 @@ fun MineScreen(
 }
 
 @Composable
-fun BillDetailScreen(bill: BillUi?, onWallet: () -> Unit, loading: Boolean = false, error: String? = null, onRetry: () -> Unit = {}) {
-    SnackbarMessage(if (bill == null) "未找到账单，请返回钱包查看其他记录" else null)
+fun BillDetailScreen(bill: BillUi?, onWallet: () -> Unit, loading: Boolean = false, error: String? = null, onRetry: () -> Unit = {}, backLabel: String = "返回钱包") {
+    SnackbarMessage(if (bill == null) "未找到账单，请返回${backLabel.removePrefix("返回")}查看其他记录" else null)
     PageColumn {
         if (loading) InlineState("正在加载账单详情", loading = true)
         error?.let { StateCard("账单详情未更新", it, action = "重新查询", onAction = onRetry) }
-        if (bill == null) SecondaryAction("返回钱包", onClick = onWallet)
+        if (bill == null) SecondaryAction(backLabel, onClick = onWallet)
         else {
             Column(Modifier.fillMaxWidth().padding(vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 IconTile(
                     if (bill.recharge) R.drawable.ic_check else R.drawable.ic_receipt,
                     tone = if (bill.recharge) IconTone.PRIMARY else IconTone.SECONDARY
                 )
-                Text(if (loading || error != null) "账单详情待核实" else if (bill.recharge) "充值完成" else if(bill.amountMilli == null) "消费金额待查询" else "消费已结算", style = MaterialTheme.typography.titleLarge)
+                Text(if (bill.recharge) "充值完成" else if (bill.amountMilli == null) "消费金额待查询" else "消费已结算", style = MaterialTheme.typography.titleLarge)
                 Text("${if (bill.recharge) "+" else "−"} ¥${money(bill.amountCents)}", style = MaterialTheme.typography.headlineLarge)
             }
             Section("账单详情") {
@@ -198,7 +198,7 @@ fun BillDetailScreen(bill: BillUi?, onWallet: () -> Unit, loading: Boolean = fal
                 SubtleDivider()
                 InfoRow("状态", "已完成")
             }
-            PrimaryAction("返回钱包", onClick = onWallet)
+            PrimaryAction(backLabel, onClick = onWallet)
         }
     }
 }

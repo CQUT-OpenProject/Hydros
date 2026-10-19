@@ -613,8 +613,32 @@ class HydrosFlowTest {
         click("关于 Hydros"); waitFor("构建时间")
         screenshot("about-dark")
     }
+    @Test fun displaySettingsPersistEndOfUseDestinationWithRadioRows() {
+        open(); click("我的")
+        click("显示设置")
+        waitFor("字体大小")
+        ui.onNodeWithText("结束使用后跳转").assertExists()
+        ui.onNodeWithText("设备页").assertIsSelected()
+        ui.onNodeWithText("账单详情页").assertIsNotSelected()
+        screenshot("display-settings-destination-default")
+        click("账单详情页")
+        ui.waitUntil(5_000) { store.destination == PostSessionDestination.BILL }
+        ui.onNodeWithText("账单详情页").assertIsSelected()
+        ui.onNodeWithText("设备页").assertIsNotSelected()
+        screenshot("display-settings-destination-bill")
+        ui.onNodeWithContentDescription("返回").performClick()
+        waitFor("学校")
+        click("显示设置")
+        waitFor("字体大小")
+        ui.onNodeWithText("账单详情页").assertIsSelected()
+        ui.onNodeWithText("设备页").assertIsNotSelected()
+        // Font size stays in the same page and keeps its own section.
+        ui.onNodeWithText("字体大小").assertExists()
+        assertEquals(PostSessionDestination.BILL,store.destination)
+    }
     private class UiStore : HydrosStore {
         var auth: Credentials?=null; var record=SavedAccount(); var mode="SYSTEM"; var onboarding=true
+        var destination=PostSessionDestination.DEVICE
         override suspend fun credentials()=auth
         override suspend fun credentials(value: Credentials?) { auth=value }
         override suspend fun account(key: String)=record
@@ -630,6 +654,8 @@ class HydrosFlowTest {
             transform(feedbackSettings).also { feedbackSettings = it }
         override suspend fun onboardingCompleted() = onboarding
         override suspend fun onboardingCompleted(value: Boolean) { onboarding = value }
+        override suspend fun postSessionDestination() = destination
+        override suspend fun postSessionDestination(value: PostSessionDestination) { destination = value }
     }
     private class UiBle : BlePort {
         override val ready=false

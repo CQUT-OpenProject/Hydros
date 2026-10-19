@@ -3,6 +3,7 @@ package dev.uednd.hydros.data.repository
 import dev.uednd.hydros.data.network.Credentials
 import dev.uednd.hydros.ui.state.BillType
 import dev.uednd.hydros.ui.state.BillUi
+import dev.uednd.hydros.ui.state.SessionUi
 import java.time.YearMonth
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -116,6 +117,49 @@ class BillHistory(
                 if (credentials.value == auth) mutable.value = state.value.copy(error = error, loading = false)
             }
         }
+    }
+
+    /**
+     * Loads the month that should contain a just-finished session's bill and returns the matching
+     * row, so its detail page can be opened without visiting the wallet list first.
+     */
+    suspend fun locateSessionBill(session: SessionUi): BillUi? {
+        synchronizeAccount()
+        val auth = owner ?: return null
+        val consumedMonth = session.consumeDate.takeIf(String::isNotBlank)
+            ?.let { runCatching { parseDate(it) }.getOrNull() }
+            ?.let(YearMonth::from)
+        val months = listOfNotNull(consumedMonth, YearMonth.now()).map(YearMonth::toString).distinct()
+        for (month in months) {
+            val query = Query(month, BillType.CONSUMPTION)
+            val bills = try {
+                // Reuse a request the session-end refresh may have already started for this query.
+                requests[query]?.takeIf { it.isActive }?.await() ?: wallet.bills(auth, month, BillType.CONSUMPTION)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                continue
+            }
+            if (credentials.value != auth) return null
+            cache[query] = CachedBills(bills, nowMillis())
+            while (cache.size > 24) cache.remove(cache.keys.first())
+            bills.firstOrNull { it.matchesFinishedSession(session) }?.let { bill ->
+                // Publish only a confirmed match, replacing whichever month was being browsed.
+                selection?.cancel()
+                mutable.value = state.value.copy(month = month, type = BillType.CONSUMPTION,
+                    bills = bills, loading = false, error = null)
+                return bill
+            }
+        }
+        return null
+    }
+
+    /** Order identifiers are authoritative; consumeDate is the fallback for rows without one. */
+    private fun BillUi.matchesFinishedSession(session: SessionUi): Boolean {
+        if (session.orderNo.isNotBlank() && (id == session.orderNo || orderNo == session.orderNo)) return true
+        val consumedAt = session.consumeDate.takeIf(String::isNotBlank)
+            ?.let { runCatching { parseDate(it) }.getOrNull() } ?: return false
+        return time == consumedAt
     }
 
     suspend fun loadDetail(id: String) {

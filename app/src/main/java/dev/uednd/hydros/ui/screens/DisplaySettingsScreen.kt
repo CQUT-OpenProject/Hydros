@@ -1,6 +1,7 @@
 package dev.uednd.hydros.ui.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -13,13 +14,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.uednd.hydros.data.storage.FontSizeOption
-import dev.uednd.hydros.ui.theme.LocalSystemDensity
+import dev.uednd.hydros.data.storage.PostSessionDestination
 import dev.uednd.hydros.ui.components.*
+import dev.uednd.hydros.ui.theme.LocalSystemDensity
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @Composable
-fun DisplaySettingsScreen(savedScale: Float, onPreview: (Float?) -> Unit, onSave: suspend (Float) -> Boolean) {
+fun DisplaySettingsScreen(savedScale: Float, onPreview: (Float?) -> Unit, onSave: suspend (Float) -> Boolean,
+    postSessionDestination: PostSessionDestination, onPostSessionDestination: (PostSessionDestination) -> Unit) {
     val options = FontSizeOption.entries
     var draft by remember(savedScale) { mutableFloatStateOf(savedScale) }
     var saving by remember { mutableStateOf(false) }
@@ -68,6 +71,22 @@ fun DisplaySettingsScreen(savedScale: Float, onPreview: (Float?) -> Unit, onSave
                     }
                     Text("A", Modifier.heightIn(min = 48.dp).wrapContentHeight(Alignment.CenterVertically),
                         fontSize = 40.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        Section("结束使用后跳转") {
+            Column(Modifier.selectableGroup()) {
+                PostSessionDestination.entries.forEachIndexed { index, destination ->
+                    RadioRow(
+                        title = destination.label,
+                        supporting = when (destination) {
+                            PostSessionDestination.DEVICE -> "结束使用后回到首页设备页"
+                            PostSessionDestination.BILL -> "结束使用后查看本次消费账单"
+                        },
+                        selected = destination == postSessionDestination,
+                        onClick = { onPostSessionDestination(destination) }
+                    )
+                    if (index < PostSessionDestination.entries.lastIndex) SubtleDivider()
                 }
             }
         }

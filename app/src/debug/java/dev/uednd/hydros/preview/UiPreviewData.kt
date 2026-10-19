@@ -6,6 +6,7 @@ import dev.uednd.hydros.data.HydrosDependencies
 import dev.uednd.hydros.data.network.*
 import dev.uednd.hydros.data.repository.*
 import dev.uednd.hydros.data.storage.HydrosStore
+import dev.uednd.hydros.data.storage.PostSessionDestination
 import dev.uednd.hydros.data.storage.SavedAccount
 import dev.uednd.hydros.ui.state.*
 import kotlinx.coroutines.CoroutineScope
@@ -106,6 +107,13 @@ private class UiPreviewStore(context: Context) : HydrosStore {
             settings.edit().putBoolean("hapticFeedbackEnabled", it.hapticFeedbackEnabled)
                 .putBoolean("reduceMotionEnabled", it.reduceMotionEnabled).apply()
         }
+    override suspend fun postSessionDestination(): PostSessionDestination {
+        val saved = settings.getString("postSessionDestination", PostSessionDestination.DEVICE.name)
+        return PostSessionDestination.entries.firstOrNull { it.name == saved } ?: PostSessionDestination.DEVICE
+    }
+    override suspend fun postSessionDestination(value: PostSessionDestination) {
+        settings.edit().putString("postSessionDestination", value.name).apply()
+    }
 }
 
 /** No HTTP, SMS, Bluetooth, MQTT, or foreground session service is used by this graph. */
