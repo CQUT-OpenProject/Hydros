@@ -3,13 +3,17 @@ package dev.uednd.hydros.ui.screens
 import dev.uednd.hydros.data.feedback.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.uednd.hydros.R
 import dev.uednd.hydros.ui.components.*
@@ -47,6 +51,12 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
         else -> null
     }
     SnackbarMessage(restriction, eventKey = device?.id to restriction)
+    SnackbarMessage(
+        state.connectionMessage?.takeIf { device != null && state.connectingId == device.id && state.connectionStage == ConnectionStage.READY },
+        eventKey = device?.id to state.connectionMessage,
+        error = false,
+        severity = FeedbackSeverity.INFO,
+    )
     PageColumn {
         if (device == null) SecondaryAction("返回", onClick = onBack)
         else {
@@ -90,9 +100,6 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
                 }, Modifier.semantics(mergeDescendants = true) {})
                 SubtleDivider()
                 InfoRow("预扣金额", "¥ ${money(device.depositCents)}")
-            }
-            state.connectionMessage?.takeIf { state.connectingId == device.id && state.connectionStage == ConnectionStage.READY }?.let {
-                Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             state.deviceActionError?.takeIf { state.connectingId == device.id && state.session == null }?.let {
                 StateCard("开启未完成", it, action = "重新连接", onAction = { onConnect(device) })
@@ -157,7 +164,7 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
 }
 
 @Composable
-fun SessionScreen(session: SessionUi?, onFinish: () -> Unit, onHome: () -> Unit, remarks: Map<String, String> = emptyMap(), working: Boolean = false, observation: SessionObservation = SessionObservation()) {
+fun SessionScreen(session: SessionUi?, onFinish: () -> Unit, onHome: () -> Unit, remarks: Map<String, String> = emptyMap(), working: Boolean = false, observation: SessionObservation = SessionObservation(), resolvingDestination: Boolean = false) {
     var seconds by remember { mutableLongStateOf(0) }
     LaunchedEffect(session?.startedAt, session?.endedAt) {
         while (session != null) {
@@ -166,9 +173,31 @@ fun SessionScreen(session: SessionUi?, onFinish: () -> Unit, onHome: () -> Unit,
             delay(1000)
         }
     }
-    PageColumn {
-        if (session == null) StateCard("当前没有使用中的设备", "从设备页扫码连接，开始使用。", action = "返回首页", onAction = onHome)
-        else {
+    val spinning = session != null && (working || session.stage in listOf(SessionStage.OPENING, SessionStage.STOPPING, SessionStage.SETTLING))
+    val observed = session != null && observation.deviceId == session.device.id && observation.startedAt == session.startedAt
+    val confirmedAt = observation.lastConfirmedAt?.let {
+        "上次确认：" + java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.CHINA).format(java.util.Date(it))
+    }
+    val observationNotice = if (session != null && !spinning && observed) {
+        observation.actionError?.takeIf { it != session.message } ?: if (observation.unavailable) {
+            if (observation.lastConfirmedAt == null) "暂时无法确认设备状态，请检查水流并恢复连接。本次启动后尚未成功核实设备状态"
+            else "暂时无法确认设备状态，请检查水流并恢复连接"
+        } else null
+    } else null
+    SnackbarMessage(observationNotice, eventKey = Triple(session?.device?.id, session?.startedAt, observationNotice), error = false, source = "device", severity = FeedbackSeverity.WARNING)
+    when {
+        session == null && resolvingDestination -> SpinningTransition(title = "正在打开账单", description = "正在获取本次使用对应的账单…")
+        session == null -> PageColumn {
+            StateCard("当前没有使用中的设备", "从设备页扫码连接，开始使用。", action = "返回首页", onAction = onHome)
+        }
+        spinning -> SpinningTransition(
+            title = sessionBusyTitle(session),
+            description = session.message,
+            elapsed = elapsed(seconds),
+            deviceName = session.device.displayName(remarks),
+            onHome = onHome,
+        )
+        else -> PageColumn {
             HeroCard(
                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 contentColor = MaterialTheme.colorScheme.onSecondaryContainer
@@ -179,9 +208,10 @@ fun SessionScreen(session: SessionUi?, onFinish: () -> Unit, onHome: () -> Unit,
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     Glyph(session.device.category.icon, modifier = Modifier.size(64.dp))
-                    Text(if(session.stage == SessionStage.USING) "正在${session.device.category.label}" else session.stage.label, style = MaterialTheme.typography.titleLarge)
+                    Text(if (session.stage == SessionStage.USING) "正在${session.device.category.label}" else session.stage.label, style = MaterialTheme.typography.titleLarge)
                     Text(elapsed(seconds), style = MaterialTheme.typography.headlineLarge)
                     Text("使用时长", style = MaterialTheme.typography.bodySmall)
+                    if (observed && confirmedAt != null) Text(confirmedAt, style = MaterialTheme.typography.bodySmall)
                 }
             }
             Section("当前设备") {
@@ -193,31 +223,50 @@ fun SessionScreen(session: SessionUi?, onFinish: () -> Unit, onHome: () -> Unit,
                 SubtleDivider()
                 InfoRow("预扣", "¥ ${money(session.device.depositCents)}")
             }
-            session.message?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-            if (observation.deviceId == session.device.id && observation.startedAt == session.startedAt) {
-                if (observation.unavailable) {
-                    Text("暂时无法确认设备状态，请检查水流并恢复连接", color = MaterialTheme.colorScheme.error)
-                    Text(observation.lastConfirmedAt?.let { "上次确认：" + java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.CHINA).format(java.util.Date(it)) }
-                        ?: "本次启动后尚未成功核实设备状态")
-                }
-                observation.actionError?.takeIf { it != session.message }?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            }
-            if (session.endedAt != null && !session.deviceUseChanged) {
-                Text("设备关闭已确认，后续操作用于完成结算", style = MaterialTheme.typography.bodySmall)
-            }
-            val finishing = working || session.stage in listOf(SessionStage.OPENING, SessionStage.STOPPING, SessionStage.SETTLING)
-            DangerAction(
-                label = if (!finishing) sessionActionLabel(session) else when (session.stage) {
-                    SessionStage.OPENING -> "正在开启"
-                    SessionStage.SETTLING, SessionStage.SETTLEMENT_PENDING -> if (session.endedAt != null) "设备已关闭，正在结算" else "正在核实结算"
-                    SessionStage.WRITEBACK_PENDING -> "正在清除设备记录"
-                    SessionStage.OPEN_UNCONFIRMED -> "正在核实"
-                    else -> "正在关闭"
-                },
-                enabled = !finishing,
-                onClick = onFinish
-            )
+            DangerAction(label = sessionActionLabel(session), onClick = onFinish)
             SecondaryAction("返回首页", onClick = onHome)
+        }
+    }
+}
+
+private fun sessionBusyTitle(session: SessionUi): String = when (session.stage) {
+    SessionStage.OPENING -> "正在开启"
+    SessionStage.SETTLING, SessionStage.SETTLEMENT_PENDING -> if (session.endedAt != null) "设备已关闭，正在结算" else "正在核实结算"
+    SessionStage.WRITEBACK_PENDING -> "正在清除设备记录"
+    SessionStage.OPEN_UNCONFIRMED -> "正在核实"
+    else -> "正在关闭"
+}
+
+@Composable
+private fun SpinningTransition(
+    title: String,
+    description: String? = null,
+    elapsed: String? = null,
+    deviceName: String? = null,
+    onHome: (() -> Unit)? = null,
+) {
+    Box(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).testTag("session-transition"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier.widthIn(max = 520.dp).fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            CircularProgressIndicator(Modifier.size(48.dp))
+            Text(title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+            if (elapsed != null) {
+                Text(elapsed, style = MaterialTheme.typography.headlineLarge)
+                Text("使用时长", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (!deviceName.isNullOrBlank()) {
+                Text(deviceName, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
+            }
+            if (!description.isNullOrBlank()) {
+                Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+            }
+            if (onHome != null) SecondaryAction("返回首页", onClick = onHome)
         }
     }
 }

@@ -286,7 +286,9 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
         }
         // Each destination owns its chrome so both pages retain their own bars during a back gesture.
         HydrosSnackbarProvider(snackbar, bottomPadding = if (destinations.any { it.route == route }) mainBarHeight else 0.dp) {
-            HydrosNotificationEffects(state, updates, model::dismissMessage, model::refresh, model::loadMonth, appInfo::checkForUpdates, showUpdateErrors = route != "about/update", onSession = { openPage("session") })
+            HydrosNotificationEffects(state, updates, model::dismissMessage, model::refresh, model::loadMonth, appInfo::checkForUpdates, showUpdateErrors = route != "about/update",
+                announceSession = route != "session" || state.session?.let { state.working || it.stage in listOf(SessionStage.OPENING, SessionStage.STOPPING, SessionStage.SETTLING) } != true,
+                onSession = { openPage("session") })
             HoldActionHost {
                 Box(Modifier.fillMaxSize()) {
                     NavHost(

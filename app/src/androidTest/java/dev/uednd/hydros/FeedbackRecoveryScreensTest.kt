@@ -33,8 +33,7 @@ class FeedbackRecoveryScreensTest {
         ui.setContent { HydrosTheme { HydrosSnackbarProvider { Surface {
             SessionScreen(value, { finishes++ }, {}, observation = SessionObservation(device.id, 123, unavailable = true))
         } } } }
-        ui.onNodeWithText("暂时无法确认设备状态，请检查水流并恢复连接").performScrollTo().assertIsDisplayed()
-        ui.onNodeWithText("本次启动后尚未成功核实设备状态").assertExists()
+        ui.onNodeWithText("暂时无法确认设备状态，请检查水流并恢复连接", substring = true).assertIsDisplayed()
         ui.onNodeWithText("点击以结束使用").performScrollTo().performClick()
         assertEquals(1, finishes)
         ui.onNodeWithText("连接设备").assertDoesNotExist()

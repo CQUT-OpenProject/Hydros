@@ -358,7 +358,9 @@ class DeviceDetailTest {
         }
         ui.onNodeWithText("点击以结束使用").performScrollTo().performClick()
         assertEquals(1, finishes)
-        ui.onNode(hasText("正在关闭") and hasClickAction()).assertIsNotEnabled().performTouchInput { click() }
+        ui.onNodeWithText("正在关闭").assertIsDisplayed()
+        ui.onNode(hasText("正在关闭") and hasClickAction()).assertDoesNotExist()
+        ui.onNodeWithText("点击以结束使用").assertDoesNotExist()
         assertEquals(1, finishes)
         ui.onNodeWithTag("hold-expansion").assertDoesNotExist()
         ui.onNodeWithText("继续按住").assertDoesNotExist()
@@ -393,9 +395,11 @@ class DeviceDetailTest {
                 SessionScreen(SessionUi(device, "owner", stage = stage), {}, {})
             } } }
         }
-        listOf(SessionStage.OPENING, SessionStage.STOPPING, SessionStage.SETTLING).forEach {
-            ui.runOnIdle { stage = it }
-            ui.onNode((hasText("正在开启") or hasText("正在关闭") or hasText("正在核实结算")) and hasClickAction()).assertIsNotEnabled()
+        listOf(SessionStage.OPENING to "正在开启", SessionStage.STOPPING to "正在关闭", SessionStage.SETTLING to "正在核实结算").forEach { (next, title) ->
+            ui.runOnIdle { stage = next }
+            ui.onNodeWithText(title).assertIsDisplayed()
+            ui.onNode(hasText(title) and hasClickAction()).assertDoesNotExist()
+            ui.onNodeWithText("点击以结束使用").assertDoesNotExist()
         }
         ui.runOnIdle { stage = SessionStage.USING }
         ui.onNodeWithText("点击以结束使用").assertIsEnabled()

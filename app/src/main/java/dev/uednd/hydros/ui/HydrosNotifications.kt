@@ -19,6 +19,7 @@ internal fun HydrosNotificationEffects(
     onMonth: (String) -> Unit,
     onCheckUpdates: () -> Unit,
     showUpdateErrors: Boolean = true,
+    announceSession: Boolean = true,
     onSession: () -> Unit = {},
 ) {
     val snackbar = LocalHydrosSnackbar.current
@@ -26,7 +27,7 @@ internal fun HydrosNotificationEffects(
         state.message?.let { onMessageConsumed(); snackbar.show(it, error = state.messageSeverity == FeedbackSeverity.ERROR, source = state.messageSource, severity = state.messageSeverity,
             action = if (state.messageAction == RecoveryAction.SESSION) SnackbarAction("返回使用页面", onSession) else null) }
     }
-    SnackbarMessage(state.session?.message, eventKey = state.session?.let { Triple(it.device.id, it.startedAt, it.message) },
+    SnackbarMessage(state.session?.message.takeIf { announceSession }, eventKey = state.session?.let { Triple(it.device.id, it.startedAt, it.message) },
         source = "device", severity = FeedbackSeverity.WARNING, action = SnackbarAction("返回使用页面", onSession))
     SnackbarMessage(updates.error.takeIf { showUpdateErrors }, action = SnackbarAction("重试", onCheckUpdates), source = "background")
 }
