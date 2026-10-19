@@ -44,6 +44,7 @@ class DevicePreparationViewModelTest {
                 script = { path, _ ->
                     when (path) {
                         "device/info/mac" -> response("""{"snCode":"AABBCCDDEEFF","deviceName":"热水表","deviceId":"7","bigTypeId":"4","smallTypeId":"1","isBle":true}""")
+                        "order/tcpDevice/query/rateOrder/using" -> response(code = 306)
                         "order/downRate/bluetooth/rateOrder" -> response("""{"downData":"0011","consumeDate":"20261014120000","orderNo":"own"}""")
                         "order/query/account/bill/list" -> response("[]")
                         else -> response("{}")

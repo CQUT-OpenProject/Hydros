@@ -270,9 +270,11 @@ class SessionLifecycleTest {
             override suspend fun connect(mac: String): BleConnectResult { connections+=mac; return base.connect(mac) }
             override suspend fun query(): DeviceQueryState { if(++queries==2) gate.await(); return base.state }
         }
-        transport.script={path,fields-> if(path=="device/info/mac")
-            response("""{"snCode":"${fields["macAddress"]}","deviceName":"水表","deviceId":"7","macAddress":"${fields["macAddress"]}","bigTypeId":"4","smallTypeId":"1","isBle":true}""")
-            else throw IOException("lost allocation response") }
+        transport.script={path,fields-> when(path) {
+            "device/info/mac" -> response("""{"snCode":"${fields["macAddress"]}","deviceName":"水表","deviceId":"7","macAddress":"${fields["macAddress"]}","bigTypeId":"4","smallTypeId":"1","isBle":true}""")
+            "order/tcpDevice/query/rateOrder/using" -> response(code=306)
+            else -> throw IOException("lost allocation response")
+        } }
         val authRepo=RealAuthRepository(transport,store); authRepo.restore()
         val sessions=RealSessionRepository(transport,store,ble,lock)
         val devices=RealDeviceRepository(transport,store,ble,lock)

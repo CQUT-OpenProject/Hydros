@@ -133,8 +133,7 @@ class RealDeviceRepository(
         }?.device ?: withTimeoutOrNull(DEVICE_INFO_TIMEOUT_MS) {
             failureBoundary(FailureOperation.DEVICE, FailureStage.DEVICE_INFO) { findInfo(auth, device.ledgerMac, fallbackConnectMac = device.connectMac) }
         } ?: throw NetworkFailure("设备查询超时，请重新连接")
-        val knownBle = fresh.isBle == true || fresh.channel == ControlChannel.BLE || preferBle || store.forceBluetoothConnection()
-        if(!knownBle) {
+        if (!preferBle) {
             val response = failureBoundary(FailureOperation.DEVICE, FailureStage.CLOUD_STATUS) { transport.post("order/tcpDevice/query/rateOrder/using", mapOf("snCode" to fresh.id, "xfModel" to "0"), auth) }
             when(val state = runningOrder(response)) {
                 is RunningOrder.Running -> return@withLock remember(auth, fresh.copy(channel=ControlChannel.CLOUD, status=DeviceStatus.BUSY))

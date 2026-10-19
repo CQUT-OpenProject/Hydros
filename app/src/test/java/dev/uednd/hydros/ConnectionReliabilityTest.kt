@@ -212,7 +212,10 @@ class ConnectionReliabilityTest {
     }
 
     private fun deviceTransport() = ScriptTransport().apply {
-        script = { _, _ -> response("""{"deviceId":7,"snCode":"water","macAddress":"00158304D300","realMac":"04158304D300","isBle":true,"bigTypeId":4,"smallTypeId":1}""") }
+        script = { path, _ ->
+            if (path.endsWith("using")) response(code = 306)
+            else response("""{"deviceId":7,"snCode":"water","macAddress":"00158304D300","realMac":"04158304D300","isBle":true,"bigTypeId":4,"smallTypeId":1}""")
+        }
     }
 
     @Test fun freshDiscoveryAvoidsDuplicateInfoRequestButStillQueriesDevice() = runTest {
@@ -228,12 +231,13 @@ class ConnectionReliabilityTest {
         val repo = RealDeviceRepository(transport, MemoryStore(), ble, Mutex(), now = { now })
         val discovered = repo.find(auth, device.ledgerMac, "C0158304D300")
         repo.prepare(auth, discovered)
-        assertEquals(1, transport.requests.size)
+        assertEquals(1, transport.requests.count { it.first == "device/info/mac" })
+        assertEquals(1, transport.requests.count { it.first.endsWith("using") })
         assertEquals(listOf("C0158304D300"), addresses)
         assertEquals(1, queries)
         now = 30_001
         repo.prepare(auth, discovered)
-        assertEquals(2, transport.requests.size)
+        assertEquals(2, transport.requests.count { it.first == "device/info/mac" })
         // Server realMac is already a connection address: do not rewrite its high bits.
         assertEquals("04158304D300", addresses.last())
         assertEquals(2, queries)

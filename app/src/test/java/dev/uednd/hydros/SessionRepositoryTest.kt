@@ -169,17 +169,21 @@ class SessionRepositoryTest {
         assertEquals(ControlChannel.CLOUD,ready.channel)
         assertEquals(DeviceStatus.OFFLINE,ready.status)
     }
-    @Test fun forceBluetoothConnectionSkipsCloudStatusQuery() = runTest {
-        val store = MemoryStore().apply { forceBluetooth = true }
+    @Test fun rememberedBleAndIsBleStillUseCloudWhenStatusQuerySucceeds() = runTest {
+        val store = MemoryStore()
+        store.updateAccount(auth.key) { it.copy(devices = listOf(device(ControlChannel.BLE).copy(isBle = true))) }
         val transport = ScriptTransport()
+        val ble = ScriptBle()
         transport.script = { path, _ ->
             if (path == "device/info/mac") {
-                response("""{"deviceId":7,"deviceName":"热水表-宿舍","snCode":"AABBCCDDEEFF","macAddress":"AABBCCDDEEFF","smallTypeId":1,"onlineStatusId":1}""")
+                response("""{"deviceId":7,"deviceName":"热水表-宿舍","snCode":"AABBCCDDEEFF","macAddress":"AABBCCDDEEFF","smallTypeId":1,"isBle":true,"onlineStatusId":1}""")
             } else response()
         }
-        val ready = RealDeviceRepository(transport, store, ScriptBle(), Mutex()).prepare(auth, device(ControlChannel.UNKNOWN))
-        assertEquals(ControlChannel.BLE, ready.channel)
-        assertFalse(transport.requests.any { it.first == "order/tcpDevice/query/rateOrder/using" })
+        val ready = RealDeviceRepository(transport, store, ble, Mutex()).prepare(auth, device(ControlChannel.BLE).copy(isBle = true))
+        assertEquals(ControlChannel.CLOUD, ready.channel)
+        assertEquals(1, transport.requests.count { it.first == "order/tcpDevice/query/rateOrder/using" })
+        assertNull(ble.connectedMac)
+        assertEquals(ControlChannel.CLOUD, store.account(auth.key).devices.single().channel)
     }
     @Test fun forceBluetoothConnectionRejectsCloudStart() = runTest {
         val store = MemoryStore().apply { forceBluetooth = true }

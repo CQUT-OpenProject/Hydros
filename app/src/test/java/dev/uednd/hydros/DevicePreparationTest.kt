@@ -26,6 +26,22 @@ import java.io.IOException
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DevicePreparationTest {
+    @Test fun forceBluetoothSkipsCloudEvenWhenStatusWouldSucceed() = runTest {
+        val fixture = fixture(backgroundScope)
+        fixture.store.forceBluetooth = true
+        fixture.transport.script = { path, fields ->
+            if (path == "device/info/mac") {
+                val mac = requireNotNull(fields["macAddress"])
+                response("""{"snCode":"$mac","deviceName":"热水表","deviceId":"7","macAddress":"$mac","bigTypeId":"4","smallTypeId":"1"}""")
+            } else response()
+        }
+        fixture.preparation.prepare(fixture.device(firstMac))
+        runCurrent()
+        assertEquals(ConnectionStage.READY, fixture.preparation.state.value.stage)
+        assertEquals(ControlChannel.BLE, fixture.preparation.state.value.device?.channel)
+        assertTrue(fixture.transport.requests.none { it.first.endsWith("using") })
+    }
+
     @Test fun explicitCloudRejectionPreparesBleButRequiresAnotherStart() = runTest {
         for (rejectAtQuery in listOf(false, true)) {
             val fixture = fixture(backgroundScope)
@@ -246,11 +262,13 @@ class DevicePreparationTest {
         val ble = RecordingBle()
         val transport = ScriptTransport().apply {
             script = { path, fields ->
-                if (path == "device/info/mac") {
-                    val mac = requireNotNull(fields["macAddress"])
-                    response("""{"snCode":"$mac","deviceName":"热水表","deviceId":"7","macAddress":"$mac","bigTypeId":"4","smallTypeId":"1","isBle":true}""")
-                } else {
-                    response("""{"downData":"0011","consumeDate":"20261014120000","orderNo":"order"}""")
+                when (path) {
+                    "device/info/mac" -> {
+                        val mac = requireNotNull(fields["macAddress"])
+                        response("""{"snCode":"$mac","deviceName":"热水表","deviceId":"7","macAddress":"$mac","bigTypeId":"4","smallTypeId":"1","isBle":true}""")
+                    }
+                    "order/tcpDevice/query/rateOrder/using" -> response(code = 306)
+                    else -> response("""{"downData":"0011","consumeDate":"20261014120000","orderNo":"order"}""")
                 }
             }
         }

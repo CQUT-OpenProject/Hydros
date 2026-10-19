@@ -115,7 +115,9 @@ class DeviceLookupPerformanceTest {
 
     @Test fun preparationSharesInFlightInfoRequestAndReusesOnlyMatchingReadyConnection() = runTest {
         val responseGate = CompletableDeferred<Unit>()
-        val transport = ScriptTransport().apply { script = { _, _ -> responseGate.await(); info() } }
+        val transport = ScriptTransport().apply {
+            script = { path, _ -> responseGate.await(); if (path.endsWith("using")) response(code = 306) else info() }
+        }
         val base = ScriptBle().apply { connectedMac = "C0:15:83:04:D3:00" }
         var connections = 0
         var queries = 0
@@ -144,7 +146,7 @@ class DeviceLookupPerformanceTest {
         assertEquals(3, queries)
     }
 
-    @Test fun learnedBleChannelSurvivesCacheReuseWithoutAnotherCloudProbe() = runTest {
+    @Test fun rememberedBleChannelProbesCloudAgain() = runTest {
         val transport = ScriptTransport().apply {
             script = { path, _ -> if (path == "device/info/mac") info(isBle = null) else response(code = 306) }
         }
@@ -153,6 +155,7 @@ class DeviceLookupPerformanceTest {
         repo.prepare(auth, found)
         assertEquals(ControlChannel.BLE, repo.find(auth, mac).channel)
         repo.prepare(auth, found)
-        assertEquals(1, transport.requests.count { it.first.endsWith("using") })
+        assertEquals(2, transport.requests.count { it.first.endsWith("using") })
+        assertEquals(ControlChannel.BLE, repo.find(auth, mac).channel)
     }
 }
