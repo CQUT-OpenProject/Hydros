@@ -74,7 +74,7 @@ fun DisplaySettingsScreen(savedScale: Float, onPreview: (Float?) -> Unit, onSave
                 }
             }
         }
-        Section("结束使用后跳转") {
+        Section("结算后跳转") {
             Column(Modifier.selectableGroup()) {
                 PostSessionDestination.entries.forEachIndexed { index, destination ->
                     RadioRow(

@@ -630,7 +630,7 @@ class HydrosFlowTest {
         open(); click("我的")
         click("显示设置")
         waitFor("字体大小")
-        ui.onNodeWithText("结束使用后跳转").assertExists()
+        ui.onNodeWithText("结算后跳转").assertExists()
         ui.onNodeWithText("设备页").assertIsSelected()
         ui.onNodeWithText("账单详情页").assertIsNotSelected()
         screenshot("display-settings-destination-default")
