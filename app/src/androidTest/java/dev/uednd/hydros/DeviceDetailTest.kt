@@ -48,7 +48,7 @@ class DeviceDetailTest {
         }
         ui.onNodeWithText("原设备结算尚未完成，请先返回处理").assertExists()
         ui.onNodeWithText("已有设备正在使用，请先结束当前设备").assertDoesNotExist()
-        ui.onNodeWithText("返回使用页面").performScrollTo().performClick()
+        ui.onNodeWithText("进入使用页面").performScrollTo().performClick()
         assertEquals(1, returns)
         ui.runOnIdle { stage = SessionStage.WRITEBACK_PENDING }
         ui.onNodeWithText("原设备消费记录待清除，请先返回处理").assertExists()
@@ -65,16 +65,16 @@ class DeviceDetailTest {
             } } }
         }
         ui.onNodeWithText("已有设备正在使用，请先结束当前设备").assertDoesNotExist()
-        ui.onNodeWithText("返回使用页面").assertExists()
+        ui.onNodeWithText("进入使用页面").assertExists()
 
         ui.runOnIdle { sessionStage = SessionStage.SETTLEMENT_PENDING }
         ui.onNodeWithText("原设备结算尚未完成，请先返回处理").assertDoesNotExist()
-        ui.onNodeWithText("返回使用页面").assertExists()
+        ui.onNodeWithText("进入使用页面").assertExists()
 
         val other = device.copy(id = "other-device")
         ui.runOnIdle { currentDevice = other }
         ui.onNodeWithText("原设备结算尚未完成，请先返回处理").assertExists()
-        ui.onNodeWithText("返回使用页面").assertExists()
+        ui.onNodeWithText("进入使用页面").assertExists()
     }
 
     @Test fun closedSessionOffersSettlementAndWritebackRetriesAndStopsTimer() {

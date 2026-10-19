@@ -113,7 +113,7 @@ class NotificationScreensTest {
         ui.onNodeWithText("退出账户").performScrollTo().performClick()
         ui.onNodeWithText("请先结束当前会话，再退出账户。").assertIsDisplayed()
         ui.onNodeWithText("设备仍在使用").assertDoesNotExist()
-        ui.onNodeWithText("返回使用页面").performClick()
+        ui.onNodeWithText("进入使用页面").performClick()
         assertEquals(1, sessions)
     }
 }

@@ -33,7 +33,7 @@ fun ManageAccountScreen(
             label = "退出账户",
             icon = R.drawable.ic_logout,
             onClick = {
-                if (state.session != null) snackbar.show("请先结束当前会话，再退出账户。", SnackbarAction("返回使用页面", onSession), error = true)
+                if (state.session != null) snackbar.show("请先结束当前会话，再退出账户。", SnackbarAction("进入使用页面", onSession), error = true)
                 else logoutSheet = true
             }
         )

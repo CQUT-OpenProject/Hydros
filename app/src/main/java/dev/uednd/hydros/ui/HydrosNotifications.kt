@@ -25,9 +25,9 @@ internal fun HydrosNotificationEffects(
     val snackbar = LocalHydrosSnackbar.current
     LaunchedEffect(state.message) {
         state.message?.let { onMessageConsumed(); snackbar.show(it, error = state.messageSeverity == FeedbackSeverity.ERROR, source = state.messageSource, severity = state.messageSeverity,
-            action = if (state.messageAction == RecoveryAction.SESSION) SnackbarAction("返回使用页面", onSession) else null) }
+            action = if (state.messageAction == RecoveryAction.SESSION) SnackbarAction("进入使用页面", onSession) else null) }
     }
     SnackbarMessage(state.session?.message.takeIf { announceSession }, eventKey = state.session?.let { Triple(it.device.id, it.startedAt, it.message) },
-        source = "device", severity = FeedbackSeverity.WARNING, action = SnackbarAction("返回使用页面", onSession))
+        source = "device", severity = FeedbackSeverity.WARNING, action = SnackbarAction("进入使用页面", onSession))
     SnackbarMessage(updates.error.takeIf { showUpdateErrors }, action = SnackbarAction("重试", onCheckUpdates), source = "background")
 }

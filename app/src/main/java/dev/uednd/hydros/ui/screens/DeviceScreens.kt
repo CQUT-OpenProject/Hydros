@@ -105,7 +105,7 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
                 StateCard("开启未完成", it, action = "重新连接", onAction = { onConnect(device) })
             }
             when {
-                state.session != null -> SecondaryAction("返回使用页面", onClick = onSession)
+                state.session != null -> SecondaryAction("进入使用页面", onClick = onSession)
                 state.connectingId == device.id && state.connectionStage == ConnectionStage.CONNECTING -> StateCard("正在连接",
                     state.networkMessage ?: state.connectionMessage ?: "正在核实云端或蓝牙连接…", loading = true)
                 state.connectingId == device.id && state.connectionStage == ConnectionStage.FAILED -> {
