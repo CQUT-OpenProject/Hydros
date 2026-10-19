@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.sp
 
 enum class ThemeMode(val label: String) { SYSTEM("跟随系统"), LIGHT("亮色主题"), DARK("暗色主题") }
 
-// Gesture controls must not receive a new density when live font preview changes fontScale.
+// Font-size preview must not rescale slider layout; gesture controls read this density instead.
 val LocalSystemDensity = staticCompositionLocalOf { Density(1f) }
 
 private val Light = lightColorScheme(
