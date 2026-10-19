@@ -74,9 +74,17 @@ fun WalletScreen(state: HydrosUiState, onMonth: (String) -> Unit = {}, onBillTyp
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("钱包余额", style = MaterialTheme.typography.titleMedium)
-                            Text(if (state.wallet.totalMilli != null) "¥ ${money(state.wallet.totalCents)}" else if (state.walletLoading) "正在获取余额…" else "余额暂无法获取", style = MaterialTheme.typography.headlineLarge)
-                            if (state.walletLoading && state.wallet.totalMilli != null) Text("正在刷新余额…")
-                            if (state.walletError != null && state.wallet.totalMilli != null) Text("刷新失败，显示上次结果")
+                            when {
+                                state.wallet.totalMilli != null -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("¥ ${money(state.wallet.totalCents)}", style = MaterialTheme.typography.headlineLarge)
+                                    if (state.walletLoading) CircularProgressIndicator(Modifier.size(22.dp), color = LocalContentColor.current, strokeWidth = 2.dp)
+                                }
+                                state.walletLoading -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    CircularProgressIndicator(Modifier.size(22.dp), color = LocalContentColor.current, strokeWidth = 2.dp)
+                                    Text("正在获取余额…", style = MaterialTheme.typography.headlineLarge)
+                                }
+                                else -> Text("余额暂无法获取", style = MaterialTheme.typography.headlineLarge)
+                            }
                         }
                         TextButton(
                             onClick = { haptics.light(); onRefresh() },

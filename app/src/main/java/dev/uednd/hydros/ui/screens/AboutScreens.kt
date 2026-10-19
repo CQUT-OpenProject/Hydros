@@ -73,8 +73,9 @@ fun AboutScreen(
             MineRow("构建时间", supporting = buildTime, icon = R.drawable.ic_clock, tone = IconTone.SECONDARY)
         }
         Section("存储占用情况") {
-            MineRow("清除所有数据", supporting = dataBytes?.let { "当前占用 ${formatDataSize(it)}" }
-                ?: "正在计算占用…", icon = R.drawable.ic_delete_sweep, onClick = { clearDialog = true })
+            MineRow("清除所有数据", supporting = dataBytes?.let { "当前占用 ${formatDataSize(it)}" }.orEmpty(),
+                icon = R.drawable.ic_delete_sweep, onClick = { clearDialog = true },
+                trailing = if (dataBytes == null) ({ CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) }) else null)
         }
         Section("软件信息") {
             SwitchRow("匿名使用统计", checked = analyticsEnabled, onCheckedChange = onAnalyticsEnabled)
@@ -189,7 +190,9 @@ fun OpenSourceLicensesScreen() {
             confirmButton = { TextAction("关闭", onClick = { showSymbols = false }) }) {
             SelectionContainer {
                 Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text(license ?: "正在加载…", style = MaterialTheme.typography.bodySmall)
+                    val text = license
+                    if (text == null) Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                    else Text(text, style = MaterialTheme.typography.bodySmall)
                     TextAction("查看项目", onClick = { uri.openUri("https://github.com/google/material-design-icons") })
                 }
             }

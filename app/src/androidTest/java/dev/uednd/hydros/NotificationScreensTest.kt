@@ -52,7 +52,8 @@ class NotificationScreensTest {
         ui.onNodeWithText("重新刷新").performScrollTo().performClick()
         assertEquals(1, retries)
         ui.onNodeWithText("钱包网络错误").assertExists()
-        ui.onNodeWithText("刷新失败，显示上次结果").assertExists()
+        ui.onNodeWithText("¥ 12.34").assertExists()
+        ui.onNodeWithText("刷新失败，显示上次结果").assertDoesNotExist()
         ui.onNodeWithText("刷新", substring = false).performScrollTo().performClick()
         assertEquals(2, retries)
         ui.runOnIdle { state = state.copy(walletError = null) }

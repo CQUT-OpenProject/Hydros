@@ -236,7 +236,7 @@ internal fun ScanContent(
             )
         }
         when (state.phase) {
-            ScanPhase.PICKING -> StateCard("正在选择图片", "返回后继续扫码")
+            ScanPhase.PICKING -> StateCard("正在选择图片", "返回后继续扫码", loading = true)
             ScanPhase.DECODING -> StateCard("正在识别图片", "正在查找用水设备二维码", loading = true)
             ScanPhase.RESOLVING, ScanPhase.DONE -> StateCard("正在查询设备", queryProgress ?: "识别成功，正在获取设备信息", loading = true)
             ScanPhase.ERROR -> {

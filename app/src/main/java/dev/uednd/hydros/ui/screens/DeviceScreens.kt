@@ -112,7 +112,7 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
                     }
                 }
                 state.connectingId == device.id && state.connectionStage == ConnectionStage.READY -> {
-                    if (device.status == DeviceStatus.BUSY) PrimaryAction("核实并恢复本人订单", enabled=!state.working) { onStart(device) }
+                    if (device.status == DeviceStatus.BUSY) PrimaryAction("核实并恢复本人订单", enabled = !state.working, loading = state.working) { onStart(device) }
                     else HoldActionButton(device.id, enabled = !state.working, working = state.working) { onStart(device) }
                 }
                 device.status == DeviceStatus.OFFLINE && device.channel == ControlChannel.CLOUD && device.isBle != true -> SecondaryAction("返回", onClick = onBack)
@@ -135,6 +135,7 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
             TextAction(
                 label = if (savingRemark) "保存中" else "保存",
                 enabled = !savingRemark && !state.working,
+                loading = savingRemark,
                 onClick = {
                     scope.launch {
                         savingRemark = true

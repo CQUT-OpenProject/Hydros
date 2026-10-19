@@ -97,7 +97,7 @@ fun LoginScreen(onSend: suspend (String) -> Boolean = { false }, onLogin: suspen
                 else FormField(password, { password=it }, "密码", secret=true, error=if(submitted) passwordError(password) else null)
             }
         }
-        PrimaryAction(if(busy) "正在登录" else if(retrySeconds > 0) "${retrySeconds} 秒后重试" else "登录", enabled=!busy && retrySeconds == 0) {
+        PrimaryAction(if(busy) "正在登录" else if(retrySeconds > 0) "${retrySeconds} 秒后重试" else "登录", enabled=!busy && retrySeconds == 0, loading=busy) {
             submitted=true
             val error = phoneError(phone) ?: if (sms) codeError(code) else passwordError(password)
             if (error != null) snackbar.show(error, error = true)
@@ -153,7 +153,7 @@ fun AccountFormScreen(form: AccountForm, account: AccountUi, onSend: suspend (St
                 }
             }
         }
-        PrimaryAction(if(busy) "正在保存" else "保存修改", enabled=!busy) {
+        PrimaryAction(if(busy) "正在保存" else "保存修改", enabled=!busy, loading=busy) {
             submitted=true
             val error=when(form) {
                 AccountForm.PHONE -> phoneError(phone) ?: if (phone == account.phone) "请输入不同的新号码" else codeError(code)
