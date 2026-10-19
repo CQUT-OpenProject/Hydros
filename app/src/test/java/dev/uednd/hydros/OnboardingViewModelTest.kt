@@ -37,14 +37,13 @@ class OnboardingViewModelTest {
     fun onboardingStateFollowsStoreAndCanBeCompleted() = runTest(dispatcher) {
         val store = MemoryStore().apply { onboarding = false }
         val transport = ScriptTransport()
-        val ble = ScriptBle()
         val lock = Mutex()
         val graph = HydrosDependencies(
             auth = RealAuthRepository(transport, store),
             account = RealAccountRepository(transport),
             wallet = RealWalletRepository(transport),
-            devices = RealDeviceRepository(transport, store, ble, lock),
-            sessions = RealSessionRepository(transport, store, ble, lock),
+            devices = RealDeviceRepository(transport, store, lock),
+            sessions = RealSessionRepository(transport, store, lock),
             store = store,
             scope = this
         )
@@ -66,14 +65,13 @@ class OnboardingViewModelTest {
     fun initializedWithCompletedOnboardingRetainsTrue() = runTest(dispatcher) {
         val store = MemoryStore().apply { onboarding = true }
         val transport = ScriptTransport()
-        val ble = ScriptBle()
         val lock = Mutex()
         val graph = HydrosDependencies(
             auth = RealAuthRepository(transport, store),
             account = RealAccountRepository(transport),
             wallet = RealWalletRepository(transport),
-            devices = RealDeviceRepository(transport, store, ble, lock),
-            sessions = RealSessionRepository(transport, store, ble, lock),
+            devices = RealDeviceRepository(transport, store, lock),
+            sessions = RealSessionRepository(transport, store, lock),
             store = store,
             scope = this
         )
@@ -88,10 +86,10 @@ class OnboardingViewModelTest {
     fun declinedAnalyticsStaysOffAndAcceptedChoicePersistsAndCanBeRevoked() = runTest(dispatcher) {
         val store = MemoryStore()
         val analytics = RecordingAnalytics()
-        val transport = ScriptTransport(); val ble = ScriptBle(); val lock = Mutex()
+        val transport = ScriptTransport(); val lock = Mutex()
         val graph = HydrosDependencies(RealAuthRepository(transport, store), RealAccountRepository(transport),
-            RealWalletRepository(transport), RealDeviceRepository(transport, store, ble, lock),
-            RealSessionRepository(transport, store, ble, lock), store, this, analytics = analytics)
+            RealWalletRepository(transport), RealDeviceRepository(transport, store, lock),
+            RealSessionRepository(transport, store, lock), store, this, analytics = analytics)
         val model = HydrosViewModel(graph)
         runCurrent()
         assertFalse(store.analyticsEnabled()) // persisted default is off before the onboarding choice

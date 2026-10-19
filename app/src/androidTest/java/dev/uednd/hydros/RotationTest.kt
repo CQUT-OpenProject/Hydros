@@ -54,20 +54,9 @@ class RotationTest {
                 }
                 override suspend fun post(path: String, fields: Map<String,String>, auth: Credentials?)=ApiResponse<JsonElement>(success=false,errorCode=1)
             }
-            val ble=object : BlePort {
-                override val ready=false
-                override val connectedMac: String?=null
-                override suspend fun connect(mac: String)=BleConnectResult.NoService
-                override suspend fun query(): DeviceQueryState?=null
-                override suspend fun writeRate(bytes: ByteArray)=false
-                override suspend fun closeValve()=false
-                override suspend fun collect(): ByteArray?=null
-                override suspend fun writeBack(bytes: ByteArray)=false
-                override fun disconnect()=Unit
-            }
             val operation=Mutex()
             injected=HydrosDependencies(RealAuthRepository(remote,store),RealAccountRepository(remote),RealWalletRepository(remote),
-                RealDeviceRepository(remote,store,ble,operation),RealSessionRepository(remote,store,ble,operation),store,
+                RealDeviceRepository(remote,store,operation),RealSessionRepository(remote,store,operation),store,
                 CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate))
             application.dependencies=injected
         }

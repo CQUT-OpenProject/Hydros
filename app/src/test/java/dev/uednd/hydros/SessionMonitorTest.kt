@@ -103,7 +103,7 @@ class SessionMonitorTest {
         assertEquals(calls + 1, sessions.reconciliations.size)
     }
 
-    @Test fun expiredCredentialsClosePushButPreserveLocalBleRecovery() = runTest {
+    @Test fun expiredCredentialsStopCloudRecovery() = runTest {
         val credentials = MutableStateFlow<Credentials?>(auth)
         val sessions = RecordingSessions(session())
         val push = RecordingPush()
@@ -113,7 +113,6 @@ class SessionMonitorTest {
         val old = push.subscriptions.single()
 
         credentials.value = null
-        sessions.session.value = session().copy(device = device.copy(channel = ControlChannel.BLE))
         runCurrent()
         assertNull(push.active)
         val calls = sessions.reconciliations.size
@@ -123,8 +122,7 @@ class SessionMonitorTest {
 
         advanceTimeBy(10_000)
         runCurrent()
-        assertEquals(calls + 1, sessions.reconciliations.size)
-        assertNull(sessions.reconciliations.last())
+        assertEquals(calls, sessions.reconciliations.size)
     }
 
     @Test fun cancellationClosesSubscriptionAndStopsBothTriggers() = runTest {

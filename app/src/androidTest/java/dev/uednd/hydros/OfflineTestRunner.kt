@@ -70,21 +70,10 @@ class OfflineTestApplication : HydrosApplication() {
                 error("UI 测试未配置本地响应：$path")
             }
         }
-        val ble = object : BlePort {
-            override val ready = false
-            override val connectedMac: String? = null
-            override suspend fun connect(mac: String) = BleConnectResult.NoService
-            override suspend fun query(): DeviceQueryState? = null
-            override suspend fun writeRate(bytes: ByteArray) = false
-            override suspend fun closeValve() = false
-            override suspend fun collect(): ByteArray? = null
-            override suspend fun writeBack(bytes: ByteArray) = false
-            override fun disconnect() = Unit
-        }
         val lock = Mutex()
         return HydrosDependencies(RealAuthRepository(transport, store), RealAccountRepository(transport),
-            RealWalletRepository(transport), RealDeviceRepository(transport, store, ble, lock),
-            RealSessionRepository(transport, store, ble, lock), store,
+            RealWalletRepository(transport), RealDeviceRepository(transport, store, lock),
+            RealSessionRepository(transport, store, lock), store,
             CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
     }
 }

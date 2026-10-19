@@ -1,6 +1,5 @@
 package dev.uednd.hydros
 
-import dev.uednd.hydros.data.ble.*
 import dev.uednd.hydros.data.network.*
 import dev.uednd.hydros.data.repository.*
 import dev.uednd.hydros.ui.state.*
@@ -24,7 +23,7 @@ class DeviceLookupPerformanceTest {
             script = { _, _ -> responseGate.await(); info() }
         }
         val store = MemoryStore()
-        val repo = RealDeviceRepository(transport, store, ScriptBle(), Mutex(), now = { testScheduler.currentTime })
+        val repo = RealDeviceRepository(transport, store, Mutex(), now = { testScheduler.currentTime })
         val results = List(20) { async { repo.find(auth, "c0:15:83:04:d3:00") } }
         runCurrent()
         assertEquals(1, transport.requests.size)
@@ -42,7 +41,7 @@ class DeviceLookupPerformanceTest {
     @Test fun repeatedAdvertisementsDoNotExtendServerDataFreshness() = runTest {
         val transport = ScriptTransport().apply { script = { _, _ -> info() } }
         var now = 0L
-        val repo = RealDeviceRepository(transport, MemoryStore(), ScriptBle(), Mutex(), now = { now })
+        val repo = RealDeviceRepository(transport, MemoryStore(), Mutex(), now = { now })
         repo.find(auth, mac, mac, -40)
         now = 29_999
         repo.find(auth, mac, mac, -60)
@@ -54,7 +53,7 @@ class DeviceLookupPerformanceTest {
 
     @Test fun cacheIsScopedToFullCredentialsIncludingRefreshedLogin() = runTest {
         val transport = ScriptTransport().apply { script = { _, _ -> info() } }
-        val repo = RealDeviceRepository(transport, MemoryStore(), ScriptBle(), Mutex())
+        val repo = RealDeviceRepository(transport, MemoryStore(), Mutex())
         repo.find(auth, mac)
         repo.find(auth.copy(accountId = "another"), mac)
         repo.find(auth.copy(loginCode = "refreshed"), mac)
@@ -66,7 +65,7 @@ class DeviceLookupPerformanceTest {
         val transport = ScriptTransport().apply {
             script = { _, fields -> responseGate.await(); info(fields.getValue("macAddress")) }
         }
-        val repo = RealDeviceRepository(transport, MemoryStore(), ScriptBle(), Mutex())
+        val repo = RealDeviceRepository(transport, MemoryStore(), Mutex())
         val first = async { repo.find(auth, mac) }
         val second = async { repo.find(auth, "112233445566") }
         runCurrent()
@@ -87,7 +86,7 @@ class DeviceLookupPerformanceTest {
                 info()
             }
         }
-        val repo = RealDeviceRepository(transport, MemoryStore(), ScriptBle(), Mutex())
+        val repo = RealDeviceRepository(transport, MemoryStore(), Mutex())
         val leader = async { repo.find(auth, mac) }
         val cancelledWaiter = async { repo.find(auth, mac) }
         val waiter = async { repo.find(auth, mac) }
@@ -105,7 +104,7 @@ class DeviceLookupPerformanceTest {
 
     @Test fun failedLookupIsNotCachedAndCanBeRetried() = runTest {
         val transport = ScriptTransport().apply { script = { _, _ -> response(code = 4004) } }
-        val repo = RealDeviceRepository(transport, MemoryStore(), ScriptBle(), Mutex())
+        val repo = RealDeviceRepository(transport, MemoryStore(), Mutex())
         assertTrue(runCatching { repo.find(auth, mac) }.exceptionOrNull()?.cause is ApiFailure)
         val failedCalls = transport.requests.size
         transport.script = { _, _ -> info() }
@@ -113,49 +112,34 @@ class DeviceLookupPerformanceTest {
         assertEquals(failedCalls + 1, transport.requests.size)
     }
 
-    @Test fun preparationSharesInFlightInfoRequestAndReusesOnlyMatchingReadyConnection() = runTest {
+    @Test fun preparationSharesInFlightInfoRequest() = runTest {
         val responseGate = CompletableDeferred<Unit>()
         val transport = ScriptTransport().apply {
-            script = { path, _ -> responseGate.await(); if (path.endsWith("using")) response(code = 306) else info() }
+            script = { path, _ -> responseGate.await(); if (path.endsWith("using")) response() else info() }
         }
-        val base = ScriptBle().apply { connectedMac = "C0:15:83:04:D3:00" }
-        var connections = 0
-        var queries = 0
-        val ble = object : BlePort by base {
-            override suspend fun connect(mac: String): BleConnectResult { connections++; return base.connect(mac) }
-            override suspend fun query(): DeviceQueryState { queries++; return base.query() }
-        }
-        val repo = RealDeviceRepository(transport, MemoryStore(), ble, Mutex())
+        val repo = RealDeviceRepository(transport, MemoryStore(), Mutex())
         val device = DeviceUi(mac, "水表", "宿舍", DeviceCategory.SHOWER, ledgerMac = mac, connectMac = mac)
         val finding = async { repo.find(auth, mac) }
         val preparing = async { repo.prepare(auth, device) }
         runCurrent()
         assertEquals(1, transport.requests.size)
         responseGate.complete(Unit)
-        finding.await()
-        preparing.await()
-        assertEquals(0, connections)
-        assertEquals(1, queries)
-        base.connectedMac = "112233445566"
-        repo.prepare(auth, device)
-        assertEquals(1, connections)
-        assertEquals(2, queries)
-        base.ready = false
-        repo.prepare(auth, device)
-        assertEquals(2, connections)
-        assertEquals(3, queries)
+        val found = finding.await()
+        val ready = preparing.await()
+        assertEquals(found.id, ready.id)
+        assertEquals(ControlChannel.CLOUD, ready.channel)
+        assertEquals(1, transport.requests.count { it.first == "device/info/mac" })
+        assertEquals(1, transport.requests.count { it.first.endsWith("using") })
     }
 
-    @Test fun rememberedBleChannelProbesCloudAgain() = runTest {
+    @Test fun cloudOfflineFailsPreparationWithoutRememberingBluetooth() = runTest {
         val transport = ScriptTransport().apply {
             script = { path, _ -> if (path == "device/info/mac") info(isBle = null) else response(code = 306) }
         }
-        val repo = RealDeviceRepository(transport, MemoryStore(), ScriptBle(), Mutex())
+        val repo = RealDeviceRepository(transport, MemoryStore(), Mutex())
         val found = repo.find(auth, mac)
-        repo.prepare(auth, found)
-        assertEquals(ControlChannel.BLE, repo.find(auth, mac).channel)
-        repo.prepare(auth, found)
-        assertEquals(2, transport.requests.count { it.first.endsWith("using") })
-        assertEquals(ControlChannel.BLE, repo.find(auth, mac).channel)
+        assertTrue(runCatching { repo.prepare(auth, found) }.exceptionOrNull() is CloudDeviceOffline)
+        assertEquals(ControlChannel.UNKNOWN, repo.find(auth, mac).channel)
+        assertEquals(1, transport.requests.count { it.first.endsWith("using") })
     }
 }

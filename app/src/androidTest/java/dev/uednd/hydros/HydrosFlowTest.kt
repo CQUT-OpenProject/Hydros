@@ -11,7 +11,6 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.graphics.asAndroidBitmap
 import dev.uednd.hydros.data.*
-import dev.uednd.hydros.data.ble.*
 import dev.uednd.hydros.data.network.*
 import dev.uednd.hydros.data.repository.*
 import dev.uednd.hydros.data.storage.*
@@ -47,7 +46,6 @@ class HydrosFlowTest {
     }
     private val credentials=Credentials("test-only","1","2","3","13800138000")
     private fun open(signedIn: Boolean=true, session: SessionUi?=null, onboarding: Boolean=true, withBills: Boolean=false, compact: Boolean=false,
-        ble: BlePort = UiBle(),
         updateSource: dev.uednd.hydros.data.update.AppUpdateSource = dev.uednd.hydros.data.update.AppUpdateSource { null }) {
         transport=UiTransport().apply { this.withBills = withBills }; store=UiStore().apply { this.onboarding = onboarding; if (compact) mode = "DARK" }
         if(signedIn) store.auth=credentials
@@ -57,7 +55,7 @@ class HydrosFlowTest {
         val appScope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate); scope=appScope
         val lock=Mutex()
         val graph=HydrosDependencies(RealAuthRepository(transport,store),RealAccountRepository(transport),RealWalletRepository(transport),
-            RealDeviceRepository(transport,store,ble,lock),RealSessionRepository(transport,store,ble,lock,2,{}),store,appScope)
+            RealDeviceRepository(transport,store,lock),RealSessionRepository(transport,store,lock,2,{}),store,appScope)
         ui.setContent {
             host = androidx.activity.compose.LocalActivity.current as androidx.activity.ComponentActivity
             val density = LocalDensity.current
@@ -74,20 +72,8 @@ class HydrosFlowTest {
         waitFor(session?.let { if (it.stage == SessionStage.USING) "正在${it.device.category.label}" else it.stage.label } ?: if(signedIn) "扫码连接" else if (onboarding) "欢迎回到 Hydros" else "欢迎使用 Hydros")
     }
     @After fun cleanup() { scope?.cancel() }
-    @Test fun rejectedCloudOpeningKeepsPreparationAndRequiresSecondStartForBle() {
-        var rates = 0
-        val ble = object : BlePort {
-            override var ready = false
-            override var connectedMac: String? = null
-            override suspend fun connect(mac: String): BleConnectResult { connectedMac = mac; ready = true; return BleConnectResult.Ready }
-            override suspend fun query() = DeviceQueryState("20", "ABCDEF01", 0, 1, 2)
-            override suspend fun writeRate(bytes: ByteArray): Boolean { rates++; return true }
-            override suspend fun closeValve() = false
-            override suspend fun collect(): ByteArray? = null
-            override suspend fun writeBack(bytes: ByteArray) = false
-            override fun disconnect() { ready = false; connectedMac = null }
-        }
-        open(ble = ble)
+    @Test fun rejectedCloudOpeningDoesNotStartASession() {
+        open()
         val rejection = CompletableDeferred<ApiResponse<JsonElement>>()
         transport.cloudOpenResult = rejection
         transport.deviceInfo = """{"snCode":"AABBCCDDEEFF","deviceName":"测试用水表","deviceId":"7","macAddress":"AABBCCDDEEFF","bigTypeId":4,"smallTypeId":1}"""
@@ -98,17 +84,11 @@ class HydrosFlowTest {
         ui.onNodeWithText("扫码连接").assertExists()
         ui.onNodeWithText("设备使用").assertDoesNotExist()
         ui.runOnIdle { rejection.complete(ApiResponse(success = false, errorCode = 306)) }
-        ui.waitUntil(8_000) {
-            model.state.value.connectionStage == ConnectionStage.READY && model.state.value.devices.single().channel == ControlChannel.BLE
-        }
+        ui.waitUntil(8_000) { !model.state.value.working && model.state.value.session == null }
         ui.runOnIdle {
+            assertEquals(ControlChannel.CLOUD, model.state.value.devices.single().channel)
             assertNull(model.state.value.session)
-            assertEquals(0, rates)
-            assertFalse(model.state.value.working)
-            model.start(model.state.value.devices.single())
         }
-        waitFor("正在洗浴")
-        assertEquals(1, rates)
     }
     private fun waitFor(text: String) { ui.waitUntil(8_000) { ui.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() } }
     private fun click(text: String) {
@@ -434,8 +414,7 @@ class HydrosFlowTest {
         open(); click("我的"); click("关于 Hydros"); waitFor("构建时间")
         repeat(5) { ui.onNodeWithText("构建时间").performClick() }
         waitFor("开发者页面")
-        ui.onNodeWithText("强制蓝牙连接").assertExists()
-        ui.onNodeWithTag("developer-force-bluetooth").assertIsOff()
+        ui.onNodeWithText("强制蓝牙连接").assertDoesNotExist()
         ui.onNodeWithContentDescription("返回").performClick()
         waitFor("关于 Hydros")
         repeat(5) { ui.onNodeWithText("构建时间").performClick() }
@@ -670,17 +649,6 @@ class HydrosFlowTest {
         override suspend fun postSessionDestination() = destination
         override suspend fun postSessionDestination(value: PostSessionDestination) { destination = value }
     }
-    private class UiBle : BlePort {
-        override val ready=false
-        override val connectedMac: String?=null
-        override suspend fun connect(mac: String)=BleConnectResult.NoService
-        override suspend fun query(): DeviceQueryState?=null
-        override suspend fun writeRate(bytes: ByteArray)=false
-        override suspend fun closeValve()=false
-        override suspend fun collect(): ByteArray?=null
-        override suspend fun writeBack(bytes: ByteArray)=false
-        override fun disconnect()=Unit
-    }
     private class UiTransport : CampusTransport {
         var deviceInfo: String? = null
         var cloudOpenResult: CompletableDeferred<ApiResponse<JsonElement>>? = null
@@ -714,8 +682,6 @@ class HydrosFlowTest {
                 cloudOpenEntered = true
                 return cloudOpenResult!!.await()
             }
-            if (path == "order/downRate/bluetooth/rateOrder" && cloudOpenResult != null)
-                return data("""{"downData":"0011","consumeDate":"20261016120000","orderNo":"ble-order"}""")
             if(path=="user/password/update") { passwordFields=fields; return data("null") }
             if(path=="user/login" && fields["password"]!=passwordHash("server123")) return ApiResponse(success=false,errorCode=12,errorMessage="账号或密码错误")
             if(path=="user/registerAndLogin") lastSms=fields["smsCode"]

@@ -35,10 +35,9 @@ class DeviceRemarkTest {
                     else -> response("{}")
                 }
             } }
-            val ble = ScriptBle()
             val lock = Mutex()
             val graph = HydrosDependencies(RealAuthRepository(remote, store), RealAccountRepository(remote), RealWalletRepository(remote),
-                RealDeviceRepository(remote, store, ble, lock), RealSessionRepository(remote, store, ble, lock), store, backgroundScope)
+                RealDeviceRepository(remote, store, lock), RealSessionRepository(remote, store, lock), store, backgroundScope)
             var model = HydrosViewModel(graph)
             models.put("model", model)
             runCurrent()

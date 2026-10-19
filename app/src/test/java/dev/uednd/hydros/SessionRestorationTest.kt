@@ -25,7 +25,7 @@ class SessionRestorationTest {
         val auth=object : AuthRepository by realAuth {
             override suspend fun restore() { authRestores++; gate.await(); realAuth.restore() }
         }
-        val realSessions=RealSessionRepository(transport,store,ScriptBle(),Mutex())
+        val realSessions=RealSessionRepository(transport,store,Mutex())
         val sessions=object : SessionRepository by realSessions {
             override suspend fun restore(auth: Credentials?) { sessionRestores++; realSessions.restore(auth) }
         }
@@ -55,7 +55,7 @@ class SessionRestorationTest {
                     realAuth.restore()
                 }
             }
-            val sessions=RealSessionRepository(transport,store,ScriptBle(),Mutex())
+            val sessions=RealSessionRepository(transport,store,Mutex())
             val restoration=SessionRestoration(auth,sessions)
             val initial=launch { runCatching { restoration.restore() } }
             entered.await()
@@ -75,7 +75,7 @@ class SessionRestorationTest {
         }
         val transport=ScriptTransport()
         val auth=RealAuthRepository(transport,store)
-        val sessions=RealSessionRepository(transport,store,ScriptBle(),Mutex())
+        val sessions=RealSessionRepository(transport,store,Mutex())
         SessionRestoration(auth,sessions).restore()
         assertNull(auth.credentials.value)
         assertEquals(credentials.key,sessions.session.value?.ownerKey)

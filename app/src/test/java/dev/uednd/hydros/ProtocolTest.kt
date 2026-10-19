@@ -1,15 +1,12 @@
 package dev.uednd.hydros
 
-import dev.uednd.hydros.data.ble.*
+import dev.uednd.hydros.data.ble.MacFormat
 import dev.uednd.hydros.data.network.*
 import dev.uednd.hydros.data.repository.*
 import dev.uednd.hydros.ui.state.*
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Test
-import javax.crypto.Cipher
-import javax.crypto.spec.SecretKeySpec
-import java.util.Base64
 
 class ProtocolTest {
     @Test fun mqttIgnoresOtherOrdersRetainedAndMalformedMessages() {
@@ -29,9 +26,6 @@ class ProtocolTest {
     @Test fun signingMatchesKnownPasswordAndSmsSamples() {
         assertEquals("4BC85B3E44", passwordHash("mypassword"))
         assertEquals("f000554d9cb90c44bd0ae2ded9a847aa", smsSecret("13800138000"))
-        assertEquals(BleSignBuilder.signUpload("key", "13800138000", "aabb"), BleSignBuilder.signUpload("key", "13800138000", "AABB"))
-        val expected=DeviceSigner.md5Hex(DeviceSigner.md5Hex("deviceId7randomNumberabcdef01telephone13800138000xfModel0&key=key") + "&key=sign-kailu-855c74a88b8b494187c99b08b8c9a744")
-        assertEquals(expected, BleSignBuilder.signRateOrder("key", "13800138000", "7", "0", "ABCDEF01"))
     }
     @Test fun moneyHasNoFloatingPointOrUnknownZeroFallback() {
         assertEquals(40L, yuanMilli("0.04"))
@@ -66,40 +60,5 @@ class ProtocolTest {
         assertEquals("C0158304D300", MacFormat.connectAddressFor("00158304D300"))
         assertEquals(DeviceCategory.SHOWER, category("热水变-宿舍-1001"))
         assertEquals(DeviceCategory.DRINK, category("直饮冷水-大厅"))
-    }
-    @Test fun wireFramesRejectBadCrcLengthAndIncompleteHex() {
-        val wire=BleFrame.cmdToWire(0x23)
-        assertEquals("#600003802300A316\n", String(wire))
-        assertNotNull(BleFrame.parseWire(wire))
-        val bad=wire.copyOf(); bad[13]='B'.code.toByte()
-        assertNull(BleFrame.parseWire(bad))
-        assertNull(BleFrame.fromHex("X0")); assertNull(BleFrame.fromHex("123"))
-        assertNull(BleFrame.parseWire(wire.copyOf(wire.size-1)))
-        val payload=byteArrayOf(0,1,127,-1)
-        assertArrayEquals(payload, BleFrame.payloadOf(BleFrame.build(0x85,payload)))
-    }
-    @Test fun everyWireLengthIsValidatedBeforeExtractingItsPayload() {
-        for (length in 0..255) {
-            val frame = ByteArray(length + 5)
-            frame[0] = BleFrame.HEAD.toByte()
-            frame[2] = length.toByte()
-            frame[3] = 0x80.toByte()
-            frame[4] = 0x23
-            frame[frame.lastIndex] = BleFrame.TAIL.toByte()
-            if (frame.size >= 8) frame[frame.lastIndex - 1] = 0xA3.toByte()
-            val parsed = BleFrame.parseWire(BleFrame.toWire(frame))
-            if (length < 3) assertNull(parsed)
-            else {
-                assertNotNull(parsed)
-                assertEquals(length - 3, BleFrame.payloadOf(requireNotNull(parsed)).size)
-            }
-        }
-    }
-    @Test fun aesWritebackDecryptsServerPacketAndRejectsInvalidData() {
-        val cipher=Cipher.getInstance("AES/ECB/PKCS5Padding")
-        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(DeviceCrypto.aesKey, "AES"))
-        val encoded=Base64.getEncoder().encodeToString(cipher.doFinal("prefix-AABBCC".toByteArray()))
-        assertEquals("prefix-AABBCC", DeviceCrypto.decryptByAes(encoded))
-        assertNull(DeviceCrypto.decryptByAes(""))
     }
 }

@@ -39,9 +39,9 @@ class FeedbackViewModelTest {
                 else -> response("{}")
             } } }
             val auth = RealAuthRepository(transport, store)
-            val ble = ScriptBle(); val lock = Mutex()
+            val lock = Mutex()
             val model = HydrosViewModel(HydrosDependencies(auth, RealAccountRepository(transport), RealWalletRepository(transport),
-                RealDeviceRepository(transport, store, ble, lock), RealSessionRepository(transport, store, ble, lock), store, backgroundScope))
+                RealDeviceRepository(transport, store, lock), RealSessionRepository(transport, store, lock), store, backgroundScope))
             models.put("hydros", model); runCurrent()
             assertEquals(12_340L, model.state.value.wallet.totalMilli)
             failWallet = true; model.refresh(); runCurrent()

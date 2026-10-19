@@ -92,8 +92,6 @@ fun SoftwareUpdateScreen(
             else -> StatusCard {
                 Glyph(R.drawable.ic_check_circle, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
                 Text(if (updates.checked) "当前已是最新版本" else "检查软件更新", style = MaterialTheme.typography.titleMedium)
-                val time = updates.lastChecked?.let { DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault()).format(it) } ?: "-"
-                Text("上次检查于 $time", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 SecondaryAction("重新检查", icon = R.drawable.ic_refresh, onClick = onCheck)
             }
         }

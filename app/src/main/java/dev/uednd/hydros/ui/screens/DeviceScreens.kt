@@ -88,10 +88,6 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
                 SubtleDivider()
                 InfoRow("当前状态", device.status.label)
                 SubtleDivider()
-                InfoRow("信号强度", device.signal)
-                SubtleDivider()
-                InfoRow("连接方式", device.connection)
-                SubtleDivider()
                 InfoRow("连接状态", if (state.connectingId != device.id) "未连接" else when (state.connectionStage) {
                     ConnectionStage.IDLE -> "未连接"
                     ConnectionStage.CONNECTING -> "连接中"
@@ -107,14 +103,12 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
             when {
                 state.session != null -> SecondaryAction("进入使用页面", onClick = onSession)
                 state.connectingId == device.id && state.connectionStage == ConnectionStage.CONNECTING -> StateCard("正在连接",
-                    state.networkMessage ?: state.connectionMessage ?: "正在核实云端或蓝牙连接…", loading = true)
+                    state.networkMessage ?: state.connectionMessage ?: "正在核实云端连接…", loading = true)
                 state.connectingId == device.id && state.connectionStage == ConnectionStage.FAILED -> {
                     StateCard("连接未完成", state.connectionMessage ?: "暂时无法连接设备，请重新连接", action = "重新连接", onAction = { onConnect(device) })
-                    if (state.connectionAction in listOf(RecoveryAction.SETTINGS, RecoveryAction.ENABLE_BLUETOOTH)) {
-                        TextAction(if (state.connectionAction == RecoveryAction.ENABLE_BLUETOOTH) "开启蓝牙" else "前往设置", onClick = {
-                            val intent = if (state.connectionAction == RecoveryAction.ENABLE_BLUETOOTH) android.content.Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)
-                                else android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${context.packageName}"))
-                            context.startActivity(intent)
+                    if (state.connectionAction == RecoveryAction.SETTINGS) {
+                        TextAction("前往设置", onClick = {
+                            context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${context.packageName}")))
                         })
                     }
                 }
@@ -122,7 +116,7 @@ fun DeviceDetailScreen(device: DeviceUi?, state: HydrosUiState, onConnect: (Devi
                     if (device.status == DeviceStatus.BUSY) PrimaryAction("核实并恢复本人订单", enabled = !state.working, loading = state.working) { onStart(device) }
                     else HoldActionButton(device.id, enabled = !state.working, working = state.working) { onStart(device) }
                 }
-                device.status == DeviceStatus.OFFLINE && device.channel == ControlChannel.CLOUD && device.isBle != true -> SecondaryAction("返回", onClick = onBack)
+                device.status == DeviceStatus.OFFLINE && device.channel == ControlChannel.CLOUD -> SecondaryAction("返回", onClick = onBack)
                 else -> PrimaryAction("连接设备") { onConnect(device) }
             }
         }
@@ -208,8 +202,6 @@ fun SessionScreen(session: SessionUi?, onFinish: () -> Unit, onHome: () -> Unit,
                 InfoRow("设备", session.device.displayName(remarks))
                 SubtleDivider()
                 InfoRow("位置", session.device.location)
-                SubtleDivider()
-                InfoRow("连接", session.device.connection)
                 SubtleDivider()
                 InfoRow("预扣", "¥ ${money(session.device.depositCents)}")
             }

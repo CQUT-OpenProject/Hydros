@@ -132,22 +132,8 @@ private fun formatDataSize(bytes: Long): String = when {
 }
 
 @Composable
-fun DeveloperScreen(
-    forceBluetoothConnection: Boolean,
-    forceBluetoothEnabled: Boolean,
-    onForceBluetoothConnection: (Boolean) -> Unit,
-) {
-    PageColumn {
-        Section("连接") {
-            SwitchRow(
-                title = "强制蓝牙连接",
-                checked = forceBluetoothConnection,
-                enabled = forceBluetoothEnabled,
-                switchTag = "developer-force-bluetooth",
-                onCheckedChange = onForceBluetoothConnection,
-            )
-        }
-    }
+fun DeveloperScreen() {
+    PageColumn {}
 }
 
 @Composable

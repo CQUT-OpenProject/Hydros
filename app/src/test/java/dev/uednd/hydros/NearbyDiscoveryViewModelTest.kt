@@ -27,12 +27,11 @@ class NearbyDiscoveryViewModelTest {
                     else -> "{}"
                 }) }
             }
-            val ble = ScriptBle()
             val lock = Mutex()
             val scanner = ScriptScanner()
             val auth = RealAuthRepository(transport, store)
             val graph = HydrosDependencies(auth, RealAccountRepository(transport), RealWalletRepository(transport),
-                RealDeviceRepository(transport, store, ble, lock), RealSessionRepository(transport, store, ble, lock),
+                RealDeviceRepository(transport, store, lock), RealSessionRepository(transport, store, lock),
                 store, backgroundScope, nearbyScanner = scanner)
             val model = HydrosViewModel(graph)
             viewModels.put("hydros", model)

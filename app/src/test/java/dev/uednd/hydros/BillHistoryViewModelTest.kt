@@ -27,11 +27,10 @@ class BillHistoryViewModelTest {
             }) }
         }
         val auth = RealAuthRepository(transport, store)
-        val ble = ScriptBle()
         val lock = Mutex()
         val model = HydrosViewModel(HydrosDependencies(auth, RealAccountRepository(transport),
-            RealWalletRepository(transport), RealDeviceRepository(transport, store, ble, lock),
-            RealSessionRepository(transport, store, ble, lock), store, backgroundScope))
+            RealWalletRepository(transport), RealDeviceRepository(transport, store, lock),
+            RealSessionRepository(transport, store, lock), store, backgroundScope))
         val models = ViewModelStore().apply { put("hydros", model) }
         try {
             runCurrent()

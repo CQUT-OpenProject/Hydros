@@ -42,7 +42,6 @@ data class HydrosUiState(val initializing: Boolean = true, val signedIn: Boolean
     val detailLoading: Boolean = false, val detailError: String? = null,
     val walletError: String? = null, val billsError: String? = null, val message: String? = null, val working: Boolean = false,
     val postSessionDestination: PostSessionDestination = PostSessionDestination.DEVICE,
-    val forceBluetoothConnection: Boolean = false,
     val resolvingPostSessionDestination: Boolean = false, val postSessionBillId: String? = null)
 class HydrosViewModel(
     val graph: HydrosDependencies,
@@ -103,9 +102,8 @@ class HydrosViewModel(
                 val feedback = graph.store.feedback()
                 val fontSizeScale = graph.store.fontSizeScale()
                 val postSessionDestination = runCatching { graph.store.postSessionDestination() }.getOrDefault(PostSessionDestination.DEVICE)
-                val forceBluetoothConnection = graph.store.forceBluetoothConnection()
                 mutable.update { it.copy(theme=theme, onboardingCompleted=onboarding, analyticsEnabled=analyticsEnabled, feedback=feedback,
-                    fontSizeScale=fontSizeScale, postSessionDestination=postSessionDestination, forceBluetoothConnection=forceBluetoothConnection) }
+                    fontSizeScale=fontSizeScale, postSessionDestination=postSessionDestination) }
                 graph.restore()
                 graph.auth.authState.collectLatest { authentication ->
                     val auth = authentication.credentials
@@ -127,7 +125,6 @@ class HydrosViewModel(
                         analyticsEnabled=current.analyticsEnabled,
                         theme=current.theme, feedback=current.feedback, fontSizeScale=current.fontSizeScale,
                         postSessionDestination=current.postSessionDestination,
-                        forceBluetoothConnection=current.forceBluetoothConnection,
                         account=AccountUi(phone=auth?.phone ?: ""), devices=saved?.devices ?: emptyList(),
                         connectedDeviceIds=saved?.recent ?: emptyList(), favoriteDeviceIds=saved?.favorites ?: emptySet(),
                         deviceRemarks=saved?.deviceRemarks ?: emptyMap(), session=graph.sessions.session.value) }
@@ -301,13 +298,6 @@ class HydrosViewModel(
                 mutable.update { it.copy(analyticsEnabled = enabled) }
             }) graph.analytics.setCollectionEnabled(wasEnabled && state.value.onboardingCompleted)
         }
-    }
-    fun setForceBluetoothConnection(enabled: Boolean) {
-        if (state.value.session != null) return
-        graph.scope.launch { action {
-            graph.store.forceBluetoothConnection(enabled)
-            mutable.update { it.copy(forceBluetoothConnection = enabled) }
-        } }
     }
     fun logout() {
         graph.scope.launch { action {

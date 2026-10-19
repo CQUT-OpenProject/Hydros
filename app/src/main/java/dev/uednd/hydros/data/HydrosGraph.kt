@@ -2,8 +2,6 @@ package dev.uednd.hydros.data
 
 import android.app.Application
 import dev.uednd.hydros.BuildConfig
-import dev.uednd.hydros.data.ble.AndroidBlePort
-import dev.uednd.hydros.data.ble.BleController
 import dev.uednd.hydros.data.ble.AndroidNearbyScanner
 import dev.uednd.hydros.data.ble.NearbyScanner
 import dev.uednd.hydros.data.ble.NoNearbyScanner
@@ -90,7 +88,6 @@ fun createDependencies(app: Application): HydrosDependencies {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val store = PreferencesHydrosStore(app)
     val analytics: AnalyticsTracker = if (BuildConfig.DEBUG) NoOpAnalyticsTracker else FirebaseAnalyticsTracker(FirebaseAnalytics.getInstance(app))
-    val ble = AndroidBlePort(BleController(app))
     val operation = Mutex()
     lateinit var auth: RealAuthRepository
     lateinit var transport: HttpCampusTransport
@@ -100,7 +97,7 @@ fun createDependencies(app: Application): HydrosDependencies {
     transport = HttpCampusTransport(CampusApiFactory.create(BuildConfig.CAMPUS_BASE_URL),
         isCurrent = { auth.credentials.value == it }, recovery = recovery, onExpired = { auth.expire(it) },
         onDiagnostic = { operation, failure, httpClass, result -> analytics.networkFailure(operation, failure, httpClass, result) })
-    val sessions = RealSessionRepository(transport, store, ble, operation)
+    val sessions = RealSessionRepository(transport, store, operation)
     auth = RealAuthRepository(transport, store) { candidate ->
         val pending = sessions.session.value
         if (pending != null && pending.ownerKey != candidate.key) {
@@ -112,7 +109,7 @@ fun createDependencies(app: Application): HydrosDependencies {
         auth = auth,
         account = RealAccountRepository(transport),
         wallet = RealWalletRepository(transport),
-        devices = RealDeviceRepository(transport, store, ble, operation),
+        devices = RealDeviceRepository(transport, store, operation),
         sessions = sessions,
         store = store,
         scope = scope,

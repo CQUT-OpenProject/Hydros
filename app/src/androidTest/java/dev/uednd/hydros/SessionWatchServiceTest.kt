@@ -59,19 +59,8 @@ class SessionWatchServiceTest {
                 return ApiResponse(success=true,errorCode=0,data=Json.parseToJsonElement(data))
             }
         }
-        val ble=object : BlePort {
-            override val ready=false
-            override val connectedMac: String?=null
-            override suspend fun connect(mac: String): BleConnectResult=error("云端恢复不能连接 BLE")
-            override suspend fun query(): DeviceQueryState?=error("unexpected BLE query")
-            override suspend fun writeRate(bytes: ByteArray): Boolean=error("unexpected BLE rate")
-            override suspend fun closeValve(): Boolean=error("unexpected BLE close")
-            override suspend fun collect(): ByteArray?=error("unexpected BLE collect")
-            override suspend fun writeBack(bytes: ByteArray): Boolean=error("unexpected BLE writeback")
-            override fun disconnect()=Unit
-        }
         val auth=RealAuthRepository(transport,store)
-        val sessions=RealSessionRepository(transport,store,ble,Mutex())
+        val sessions=RealSessionRepository(transport,store,Mutex())
         // The Activity owns the original graph. Only the service can initialize this fresh graph.
         ActivityScenario.launch(MainActivity::class.java).use {
             try {

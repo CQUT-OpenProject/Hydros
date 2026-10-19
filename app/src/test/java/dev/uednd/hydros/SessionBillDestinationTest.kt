@@ -251,11 +251,10 @@ class SessionBillDestinationTest {
                 }
             }
         }
-        val ble = ScriptBle()
         val lock = Mutex()
-        val sessions = RealSessionRepository(transport, store, ble, lock, confirmationAttempts = 2, pause = {})
+        val sessions = RealSessionRepository(transport, store, lock, confirmationAttempts = 2, pause = {})
         val graph = HydrosDependencies(RealAuthRepository(transport, store), RealAccountRepository(transport),
-            RealWalletRepository(transport), RealDeviceRepository(transport, store, ble, lock), sessions, store,
+            RealWalletRepository(transport), RealDeviceRepository(transport, store, lock), sessions, store,
             scope.backgroundScope)
         return ViewModelFixture(HydrosViewModel(graph), store, transport, sessions)
     }

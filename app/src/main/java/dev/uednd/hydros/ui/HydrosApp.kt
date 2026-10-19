@@ -439,11 +439,7 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                         }
                         composable("about/developer") {
                             HydrosPage("开发者页面", onBack = { back() }) {
-                                DeveloperScreen(
-                                    forceBluetoothConnection = state.forceBluetoothConnection,
-                                    forceBluetoothEnabled = state.session == null && !state.working,
-                                    onForceBluetoothConnection = model::setForceBluetoothConnection,
-                                )
+                                DeveloperScreen()
                             }
                         }
                         composable("about/licenses") {

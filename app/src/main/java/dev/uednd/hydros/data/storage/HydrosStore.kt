@@ -28,7 +28,7 @@ import javax.crypto.spec.GCMParameterSpec
 @Serializable data class FeedbackSettings(val hapticFeedbackEnabled: Boolean = true, val reduceMotionEnabled: Boolean = false)
 @Serializable private data class SavedSettings(val token: String? = null, val lastAccount: String? = null, val theme: String = "SYSTEM", val accounts: Map<String, SavedAccount> = emptyMap(), val onboardingCompleted: Boolean = false,
     val analyticsEnabled: Boolean = false, val feedback: FeedbackSettings = FeedbackSettings(), val fontSizeScale: Float = 1f,
-    val postSessionDestination: String = PostSessionDestination.DEVICE.name, val forceBluetoothConnection: Boolean = false)
+    val postSessionDestination: String = PostSessionDestination.DEVICE.name)
 interface HydrosStore {
     suspend fun credentials(): Credentials?
     suspend fun credentials(value: Credentials?)
@@ -47,8 +47,6 @@ interface HydrosStore {
     suspend fun analyticsEnabled(value: Boolean) {}
     suspend fun postSessionDestination(): PostSessionDestination = PostSessionDestination.DEVICE
     suspend fun postSessionDestination(value: PostSessionDestination) {}
-    suspend fun forceBluetoothConnection(): Boolean = false
-    suspend fun forceBluetoothConnection(value: Boolean) {}
 }
 private val Context.hydrosPreferences by preferencesDataStore("hydros")
 class PreferencesHydrosStore(context: Context) : HydrosStore {
@@ -100,8 +98,6 @@ class PreferencesHydrosStore(context: Context) : HydrosStore {
         return PostSessionDestination.entries.firstOrNull { it.name == saved } ?: PostSessionDestination.DEVICE
     }
     override suspend fun postSessionDestination(value: PostSessionDestination) { edit { it.copy(postSessionDestination = value.name) } }
-    override suspend fun forceBluetoothConnection() = read().forceBluetoothConnection
-    override suspend fun forceBluetoothConnection(value: Boolean) { edit { it.copy(forceBluetoothConnection = value) } }
 }
 /** Only ciphertext, IV and authentication tag leave Android Keystore. */
 class CredentialCipher {

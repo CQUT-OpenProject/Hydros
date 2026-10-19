@@ -14,13 +14,9 @@ class DeveloperScreenTest {
     @Test fun developerScreenRendersWithoutCrash() {
         ui.setContent {
             HydrosTheme(ThemeMode.LIGHT) {
-                DeveloperScreen(
-                    forceBluetoothConnection = false,
-                    forceBluetoothEnabled = true,
-                    onForceBluetoothConnection = {},
-                )
+                DeveloperScreen()
             }
         }
-        ui.onNodeWithText("强制蓝牙连接").assertExists()
+        ui.onNodeWithText("强制蓝牙连接").assertDoesNotExist()
     }
 }

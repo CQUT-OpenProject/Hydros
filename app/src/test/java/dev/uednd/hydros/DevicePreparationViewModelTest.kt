@@ -43,23 +43,20 @@ class DevicePreparationViewModelTest {
             val transport = ScriptTransport().apply {
                 script = { path, _ ->
                     when (path) {
-                        "device/info/mac" -> response("""{"snCode":"AABBCCDDEEFF","deviceName":"热水表","deviceId":"7","bigTypeId":"4","smallTypeId":"1","isBle":true}""")
-                        "order/tcpDevice/query/rateOrder/using" -> response(code = 306)
-                        "order/downRate/bluetooth/rateOrder" -> response("""{"downData":"0011","consumeDate":"20261014120000","orderNo":"own"}""")
+                        "device/info/mac" -> response("""{"snCode":"AABBCCDDEEFF","deviceName":"热水表","deviceId":"7","bigTypeId":"4","smallTypeId":"1"}""")
                         "order/query/account/bill/list" -> response("[]")
                         else -> response("{}")
                     }
                 }
             }
-            val ble = ScriptBle()
             val operation = Mutex()
-            val sessions = RealSessionRepository(transport, store, ble, operation)
+            val sessions = RealSessionRepository(transport, store, operation)
             var watchStarts = 0
             val graph = HydrosDependencies(
                 auth = RealAuthRepository(transport, store),
                 account = RealAccountRepository(transport),
                 wallet = RealWalletRepository(transport),
-                devices = RealDeviceRepository(transport, store, ble, operation),
+                devices = RealDeviceRepository(transport, store, operation),
                 sessions = sessions,
                 store = store,
                 scope = backgroundScope,
@@ -71,7 +68,7 @@ class DevicePreparationViewModelTest {
             model.connect(device)
             runCurrent()
             assertEquals(ConnectionStage.READY, model.state.value.connectionStage)
-            assertEquals(ControlChannel.BLE, model.state.value.devices.single().channel)
+            assertEquals(ControlChannel.CLOUD, model.state.value.devices.single().channel)
             assertEquals(listOf(device.id), model.state.value.connectedDeviceIds)
 
             model.start(device.copy(id = "another-device"))
@@ -84,9 +81,7 @@ class DevicePreparationViewModelTest {
             model.cancelConnection()
             runCurrent()
             assertEquals(ConnectionStage.IDLE, model.state.value.connectionStage)
-            assertEquals(ControlChannel.BLE, model.state.value.session?.device?.channel)
-            assertTrue(ble.ready)
-            assertEquals(1, ble.rates)
+            assertEquals(ControlChannel.CLOUD, model.state.value.session?.device?.channel)
             assertEquals(1, watchStarts)
         } finally {
             viewModels.clear()

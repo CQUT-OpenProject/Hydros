@@ -2,7 +2,6 @@ package dev.uednd.hydros.data.repository
 
 import dev.uednd.hydros.data.network.ApiFailure
 import dev.uednd.hydros.data.network.Credentials
-import dev.uednd.hydros.data.network.CloudDeviceOffline
 import dev.uednd.hydros.data.storage.HydrosStore
 import dev.uednd.hydros.ui.state.ConnectionStage
 import dev.uednd.hydros.ui.state.DeviceUi
@@ -52,14 +51,12 @@ class DevicePreparation(
         }
     }
 
-    fun prepare(device: DeviceUi) = prepare(device, false)
-
-    private fun prepare(device: DeviceUi, forceBle: Boolean) {
+    fun prepare(device: DeviceUi) {
         val credentials = auth.credentials.value ?: return
         if (sessions.session.value != null) return
 
         val current = state.value
-        if (!forceBle && current.device?.id == device.id) {
+        if (current.device?.id == device.id) {
             if (current.stage == ConnectionStage.CONNECTING || current.stage == ConnectionStage.READY) return
         }
 
@@ -68,7 +65,7 @@ class DevicePreparation(
         val next = Attempt(credentials)
         attempt = next
         mutable.value = DevicePreparationState(device, ConnectionStage.CONNECTING,
-            message = if (forceBle) "设备离线，正在尝试蓝牙连接；暂时中断时会自动重试…" else "正在获取设备信息并连接，暂时失败时会自动重试…")
+            message = "正在获取设备信息并连接，暂时失败时会自动重试…")
 
         job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
@@ -79,14 +76,12 @@ class DevicePreparation(
                     mutable.value = DevicePreparationState()
                     return@launch
                 }
-                val preferBle = forceBle || store.forceBluetoothConnection()
-                val ready = devices.prepare(credentials, device, preferBle = preferBle)
+                val ready = devices.prepare(credentials, device)
                 val saved = store.account(credentials.key)
                 ensureActive()
                 if (attempt !== next || auth.credentials.value != credentials) return@launch
 
-                mutable.value = DevicePreparationState(ready, ConnectionStage.READY, saved.recent,
-                    message = if (forceBle) "已切换蓝牙，请再次长按以开始使用" else null)
+                mutable.value = DevicePreparationState(ready, ConnectionStage.READY, saved.recent)
                 // Keep ownership until cancellation; a completed coroutine cannot clean up later.
                 awaitCancellation()
             } catch (error: CancellationException) {
@@ -120,16 +115,7 @@ class DevicePreparation(
         if (auth.credentials.value != owner.auth) throw ApiFailure(null, "请重新连接设备")
 
         ensureWatch()
-        try {
-            sessions.start(owner.auth, device)
-        } catch (error: CloudDeviceOffline) {
-            val pending = store.account(owner.auth.key).session
-            if (attempt !== owner || auth.credentials.value != owner.auth || sessions.session.value != null ||
-                pending != null) throw error
-            // Preparing BLE cannot open a valve. The user must hold the start button again.
-            prepare(device, true)
-            return
-        }
+        sessions.start(owner.auth, device)
         if (attempt === owner) cancel()
     }
 }

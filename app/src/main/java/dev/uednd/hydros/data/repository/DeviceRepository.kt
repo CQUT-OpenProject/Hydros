@@ -1,7 +1,7 @@
 package dev.uednd.hydros.data.repository
 
 import dev.uednd.hydros.data.feedback.*
-import dev.uednd.hydros.data.ble.*
+import dev.uednd.hydros.data.ble.MacFormat
 import dev.uednd.hydros.data.network.*
 import dev.uednd.hydros.data.storage.HydrosStore
 import dev.uednd.hydros.ui.state.*
@@ -35,13 +35,12 @@ fun qrMac(raw: String): String? {
 }
 interface DeviceRepository {
     suspend fun find(auth: Credentials, mac: String, scanMac: String? = null, rssi: Int? = null): DeviceUi
-    suspend fun prepare(auth: Credentials, device: DeviceUi, preferBle: Boolean = false): DeviceUi
+    suspend fun prepare(auth: Credentials, device: DeviceUi): DeviceUi
     suspend fun release(keepConnection: () -> Boolean)
 }
 class RealDeviceRepository(
     private val transport: CampusTransport,
     private val store: HydrosStore,
-    private val ble: BlePort,
     private val operation: Mutex,
     private val now: () -> Long = { System.nanoTime() / 1_000_000 },
 ) : DeviceRepository {
@@ -125,7 +124,7 @@ class RealDeviceRepository(
         }
         return device
     }
-    override suspend fun prepare(auth: Credentials, device: DeviceUi, preferBle: Boolean): DeviceUi = operation.withLock {
+    override suspend fun prepare(auth: Credentials, device: DeviceUi): DeviceUi = operation.withLock {
         if (store.account(auth.key).session != null) throw ApiFailure(null, "请先处理当前设备会话")
         val cached = synchronized(infoCache) { infoCache[device.id] }
         val fresh = cached?.takeIf {
@@ -133,46 +132,16 @@ class RealDeviceRepository(
         }?.device ?: withTimeoutOrNull(DEVICE_INFO_TIMEOUT_MS) {
             failureBoundary(FailureOperation.DEVICE, FailureStage.DEVICE_INFO) { findInfo(auth, device.ledgerMac, fallbackConnectMac = device.connectMac) }
         } ?: throw NetworkFailure("设备查询超时，请重新连接")
-        if (!preferBle) {
-            val response = failureBoundary(FailureOperation.DEVICE, FailureStage.CLOUD_STATUS) { transport.post("order/tcpDevice/query/rateOrder/using", mapOf("snCode" to fresh.id, "xfModel" to "0"), auth) }
-            when(val state = runningOrder(response)) {
-                is RunningOrder.Running -> return@withLock remember(auth, fresh.copy(channel=ControlChannel.CLOUD, status=DeviceStatus.BUSY))
-                RunningOrder.Ended -> return@withLock remember(auth, fresh.copy(channel=ControlChannel.CLOUD,
-                    status=if(fresh.status == DeviceStatus.OFFLINE) DeviceStatus.OFFLINE else DeviceStatus.AVAILABLE))
-                RunningOrder.Unknown -> if(response.errorCode != 306) throw ApiFailure(response.errorCode, response.displayMessage ?: "设备状态暂无法确认")
-            }
+        val response = failureBoundary(FailureOperation.DEVICE, FailureStage.CLOUD_STATUS) { transport.post("order/tcpDevice/query/rateOrder/using", mapOf("snCode" to fresh.id, "xfModel" to "0"), auth) }
+        when(val state = runningOrder(response)) {
+            is RunningOrder.Running -> remember(auth, fresh.copy(channel=ControlChannel.CLOUD, status=DeviceStatus.BUSY))
+            RunningOrder.Ended -> remember(auth, fresh.copy(channel=ControlChannel.CLOUD,
+                status=if(fresh.status == DeviceStatus.OFFLINE) DeviceStatus.OFFLINE else DeviceStatus.AVAILABLE))
+            RunningOrder.Unknown -> if (response.errorCode == 306) throw CloudDeviceOffline()
+                else throw ApiFailure(response.errorCode, response.displayMessage ?: "设备状态暂无法确认")
         }
-        try {
-            when (val result = if (ble.isConnectedTo(fresh.connectMac)) BleConnectResult.Ready
-                else failureBoundary(FailureOperation.DEVICE, FailureStage.BLE_CONNECT) { ble.connectWithRetry(fresh.connectMac) }) {
-                BleConnectResult.Ready -> Unit
-                BleConnectResult.NoService -> {
-                    // Only positive service discovery disproves an earlier remembered BLE choice.
-                    store.updateAccount(auth.key) { account -> account.copy(devices = account.devices.map {
-                        if (it.id == fresh.id) it.copy(channel = ControlChannel.UNKNOWN) else it
-                    }) }
-                    synchronized(infoCache) { infoCache.remove(fresh.id) }
-                    throw AppFailure(FailureOperation.DEVICE, FailureStage.BLE_CONNECT, FailureReason.UNSUPPORTED)
-                }
-                is BleConnectResult.Failed -> result.requireReady(FailureOperation.DEVICE)
-            }
-            val state = ble.query() ?: throw ble.commandError(FailureOperation.DEVICE)
-            when (state.state) {
-                0 -> Unit
-                1 -> throw ApiFailure(307, "设备正在使用，请选择其他设备；如需处理本人订单，请联系服务商")
-                3, 6 -> throw ApiFailure(null, "设备有未结算记录，请先在原使用账户或服务商官方应用中完成结算")
-                else -> throw ApiFailure(null, "设备状态暂不支持开始使用，请稍后重试")
-            }
-        } catch (error: Exception) {
-            ble.disconnect()
-            throw error
-        }
-        remember(auth, fresh.copy(channel=ControlChannel.BLE, status=DeviceStatus.AVAILABLE))
     }
-    override suspend fun release(keepConnection: () -> Boolean) = operation.withLock {
-        // Session creation and this ownership check use the same operation lock.
-        if (!keepConnection()) ble.disconnect()
-    }
+    override suspend fun release(keepConnection: () -> Boolean) = Unit
     private suspend fun remember(auth: Credentials, device: DeviceUi): DeviceUi {
         store.updateAccount(auth.key) { it.copy(devices=it.devices.filterNot { d -> d.id == device.id } + device,
             recent=listOf(device.id) + it.recent.filterNot { id -> id == device.id }) }

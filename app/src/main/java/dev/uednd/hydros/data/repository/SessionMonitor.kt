@@ -82,7 +82,7 @@ class SessionMonitor(
             suspend fun perform() {
                 val session = sessions.session.value ?: return
                 val auth = credentials.value
-                if (session.device.channel == ControlChannel.CLOUD && (auth == null || auth.key != session.ownerKey)) return
+                if (auth == null || auth.key != session.ownerKey) return
                 reconcile()
                 // Coalesce signals already covered by the completed reconciliation.
                 while (signals.tryReceive().isSuccess) { }
@@ -92,7 +92,7 @@ class SessionMonitor(
             while (isActive && sessions.session.value != null) {
                 val session = sessions.session.value ?: break
                 val auth = credentials.value
-                val canPoll = session.device.channel != ControlChannel.CLOUD || (auth != null && auth.key == session.ownerKey)
+                val canPoll = auth != null && auth.key == session.ownerKey
                 val interval = if (session.stage == SessionStage.USING) pollIntervalMillis else recoveryIntervalMillis
                 val shouldReconcile = select<Boolean> {
                     scheduleChanges.onReceive { false }
