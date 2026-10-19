@@ -179,14 +179,14 @@ class RealSessionRepository(private val transport: CampusTransport, private val 
             3, 6 -> throw ApiFailure(null, "设备有未结算记录，请在原使用账户或服务商官方应用完成结算")
             else -> throw ApiFailure(null, "暂时无法确认设备状态，请稍后重新连接")
         }
-        if(device.deviceId.isBlank() || device.bigTypeId == null || device.smallTypeId == null) throw ApiFailure(null, "设备缺少费率请求参数")
+        if (device.deviceId.isBlank()) throw ApiFailure(null, "设备资料不完整，请重新扫描后再试")
         val signature = BleSignBuilder.signRateOrder(auth.loginCode, auth.phone, device.deviceId, "0", state.randomNumber) ?: throw ApiFailure(null, "费率签名失败")
         val ledgerMac = MacFormat.normalize(device.ledgerMac) ?: throw ApiFailure(null, "设备地址无效")
         save(value) // Allocation can reserve money even when no BLE command is ever sent.
         try {
             val response = transport.post("order/downRate/bluetooth/rateOrder", mapOf("deviceId" to device.deviceId,
                 "macAddress" to ledgerMac, "macType" to BleSignBuilder.macType(state.devType, state.a1),
-                "bigTypeId" to device.bigTypeId, "smallTypeId" to device.smallTypeId, "protocolType" to state.protocolType,
+                "bigTypeId" to (device.bigTypeId ?: "0"), "smallTypeId" to (device.smallTypeId ?: "0"), "protocolType" to state.protocolType,
                 "randomNumber" to state.randomNumber.lowercase(), "xfModel" to "0", "signature" to signature), auth)
             if (!response.ok) { clear(value); response.requireSuccess() }
             val data = response.requireData()

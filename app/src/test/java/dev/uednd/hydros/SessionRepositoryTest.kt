@@ -1,5 +1,7 @@
 package dev.uednd.hydros
 
+import dev.uednd.hydros.data.feedback.FailureOperation
+import dev.uednd.hydros.data.feedback.failureFeedback
 import dev.uednd.hydros.data.storage.FeedbackSettings
 import dev.uednd.hydros.data.ble.*
 import dev.uednd.hydros.data.network.*
@@ -118,6 +120,17 @@ class SessionRepositoryTest {
         assertEquals(SessionStage.OPEN_UNCONFIRMED,r.session.value?.stage)
         val restarted=repo(t,s,b); restarted.restore(auth); restarted.reconcile(auth)
         assertEquals(SessionStage.USING,restarted.session.value?.stage); assertEquals(1,b.rates)
+    }
+    @Test fun bleStartOmitsAbsentTypeIdsAsZeroAndStillRequiresDeviceId()=runTest {
+        val s=MemoryStore(); val t=ScriptTransport(); val b=ScriptBle(); val r=repo(t,s,b)
+        t.script={_,_->response("""{"downData":"0011","consumeDate":"20261014120000","orderNo":"own"}""")}
+        r.start(auth, device(ControlChannel.BLE).copy(bigTypeId=null, smallTypeId=null))
+        val rate=t.requests.first { it.first=="order/downRate/bluetooth/rateOrder" }.second
+        assertEquals("0", rate["bigTypeId"]); assertEquals("0", rate["smallTypeId"]); assertEquals("7", rate["deviceId"])
+        assertEquals(SessionStage.USING, r.session.value?.stage); assertEquals(1, b.rates)
+        val rejected=runCatching { repo(ScriptTransport(), MemoryStore(), ScriptBle()).start(auth, device(ControlChannel.BLE).copy(deviceId="")) }.exceptionOrNull()
+        assertEquals("设备资料不完整，请重新扫描后再试", (rejected as ApiFailure).message)
+        assertEquals("设备资料不完整，请重新扫描后再试", failureFeedback(rejected, FailureOperation.START).text)
     }
     @Test fun bleWritebackRetryNeverUploadsAgainEvenAcrossRestart()=runTest {
         val s=MemoryStore(); val t=ScriptTransport(); val b=ScriptBle(); val r=repo(t,s,b)
