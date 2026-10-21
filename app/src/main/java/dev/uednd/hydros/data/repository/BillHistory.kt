@@ -1,5 +1,9 @@
 package dev.uednd.hydros.data.repository
 
+import dev.uednd.hydros.data.analytics.BillQueryScope
+import dev.uednd.hydros.data.analytics.FailureCategory
+import dev.uednd.hydros.data.analytics.ResultCode
+import dev.uednd.hydros.data.analytics.failureCategory
 import dev.uednd.hydros.data.network.Credentials
 import dev.uednd.hydros.ui.state.BillType
 import dev.uednd.hydros.ui.state.BillUi
@@ -26,6 +30,7 @@ class BillHistory(
     private val wallet: WalletRepository,
     private val credentials: StateFlow<Credentials?>,
     scope: CoroutineScope,
+    private val onQueryResult: (BillQueryScope, ResultCode, FailureCategory?) -> Unit = { _, _, _ -> },
     private val nowMillis: () -> Long = { System.nanoTime() / 1_000_000 },
 ) {
     // A failed query must not cancel other queries or the caller's scope.
@@ -137,11 +142,17 @@ class BillHistory(
             try {
                 request.await()
                 ensureActive()
-                if (credentials.value == auth) publishBills(loading = false)
+                if (credentials.value == auth) {
+                    publishBills(loading = false)
+                    reportQuery(BillQueryScope.LIST, ResultCode.SUCCESS, null)
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (credentials.value == auth) publishBills(loading = false, error = error)
+                if (credentials.value == auth) {
+                    publishBills(loading = false, error = error)
+                    reportQuery(BillQueryScope.LIST, ResultCode.FAILURE, failureCategory(error))
+                }
             }
         }
     }
@@ -218,12 +229,14 @@ class BillHistory(
                 if (!applied) store.applyDetailWithoutQuery(id, detail, fetchedAt)
                 publishBills()
                 clearDetailSync(id)
+                reportQuery(BillQueryScope.DETAIL, ResultCode.SUCCESS, null)
             } catch (error: CancellationException) {
                 clearDetailSync(id)
                 throw error
             } catch (error: Exception) {
                 if (startedIn == epoch && credentials.value == auth) {
                     setDetailSync(id, BillDetailState(error = error))
+                    reportQuery(BillQueryScope.DETAIL, ResultCode.FAILURE, failureCategory(error))
                 }
             }
         }
@@ -232,4 +245,11 @@ class BillHistory(
         pending.start()
         pending.await()
     }
+    /** Analytics must never break bill loading; cancellation still belongs to the caller. */
+    private fun reportQuery(scope: BillQueryScope, result: ResultCode, failure: FailureCategory?) {
+        try { onQueryResult(scope, result, failure) }
+        catch (error: CancellationException) { throw error }
+        catch (_: Exception) { }
+    }
+
 }
