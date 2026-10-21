@@ -119,7 +119,15 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           CERTIFICATE: ${{ steps.signing.outputs.certificate }}
         run: |
-          ./gradlew --no-daemon :app:lintRelease :app:assembleRelease
+          set -euo pipefail
+          build() {
+            ./gradlew --no-daemon :app:lintRelease :app:assembleRelease "$@"
+          }
+          if ! build; then
+            echo "Gradle build failed; retrying once with refreshed dependencies."
+            sleep 10
+            build --refresh-dependencies
+          fi
           python3 scripts/release.py stage --apk app/build/outputs/apk/release/app-release.apk --version "$VERSION" --commit "$COMMIT" --certificate "$CERTIFICATE"
       - name: Upload APK and release record
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
