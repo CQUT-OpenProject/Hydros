@@ -4,16 +4,6 @@ import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.uednd.hydros.BuildConfig
-import dev.uednd.hydros.data.analytics.AnalyticsTracker
-import dev.uednd.hydros.data.analytics.HttpClass
-import dev.uednd.hydros.data.analytics.NetworkOperation
-import dev.uednd.hydros.data.analytics.NoOpAnalyticsTracker
-import dev.uednd.hydros.data.analytics.RecoveryResult
-import dev.uednd.hydros.data.analytics.ResultCode
-import dev.uednd.hydros.data.analytics.UpdateCheckOutcome
-import dev.uednd.hydros.data.analytics.FailureCategory
-import dev.uednd.hydros.data.analytics.failureCategory
-import dev.uednd.hydros.data.update.InstallPhase
 import dev.uednd.hydros.data.feedback.FailureOperation
 import dev.uednd.hydros.data.feedback.failureFeedback
 import dev.uednd.hydros.data.update.AppInstaller
@@ -50,7 +40,6 @@ data class ReleaseHistoryUiState(
 class AppInfoViewModel(
     private val source: AppUpdateSource = GitHubAppUpdates(),
     private val installer: AppInstaller? = null,
-    private val analytics: AnalyticsTracker = NoOpAnalyticsTracker,
 ) : ViewModel() {
     private val mutable = MutableStateFlow(AppUpdateUiState())
     val updates = mutable.asStateFlow()
@@ -70,24 +59,17 @@ class AppInfoViewModel(
                 detailMutable.value = ReleaseHistoryUiState(loaded = true, releases = listOfNotNull(release),
                     error = if (release == null) "未获取到此版本的发布信息" else null, hasMore = false)
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { analytics.networkFailure(NetworkOperation.UPDATE, failureCategory(error), HttpClass.UNKNOWN, RecoveryResult.FAILED); detailMutable.value = ReleaseHistoryUiState(error = failureFeedback(error, FailureOperation.UPDATE).text, hasMore = false) }
+            catch (error: Exception) { detailMutable.value = ReleaseHistoryUiState(error = failureFeedback(error, FailureOperation.UPDATE).text, hasMore = false) }
         }
     }
 
     init {
         checkForUpdates()
         installer?.let { native ->
-            // Installation kills the old process, so success is observed on the next launch.
-            if (native.consumeInstallCompleted()) analytics.updateInstallResult(ResultCode.SUCCESS)
+            // Clear the one-shot completion marker left by the previous process.
+            native.consumeInstallCompleted()
             viewModelScope.launch {
-                var priorPhase: InstallPhase? = null
                 native.state.collect { install ->
-                    val phase = install.phase
-                    // Cancelling resets the state to idle without an error, which is not a success.
-                    if (priorPhase != null && phase == null && install.error != null) {
-                        analytics.updateInstallResult(ResultCode.FAILURE, FailureCategory.UNKNOWN)
-                    }
-                    priorPhase = phase
                     mutable.value = mutable.value.copy(install = install)
                 }
             }
@@ -104,11 +86,8 @@ class AppInfoViewModel(
                 val hasUpdate = release?.let { isNewerRelease(it.version, BuildConfig.VERSION_NAME) } == true
                 mutable.value = mutable.value.copy(checking = false, checked = true, release = release,
                     lastChecked = Instant.now(), error = null, hasUpdate = hasUpdate)
-                analytics.updateCheckResult(if (hasUpdate) UpdateCheckOutcome.UPDATE_AVAILABLE else UpdateCheckOutcome.UP_TO_DATE)
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) {
-                analytics.networkFailure(NetworkOperation.UPDATE, failureCategory(error), HttpClass.UNKNOWN, RecoveryResult.FAILED)
-                analytics.updateCheckResult(UpdateCheckOutcome.FAILURE, failureCategory(error))
                 mutable.value = mutable.value.copy(checking = false, error = failureFeedback(error, FailureOperation.UPDATE).text)
             }
         }
@@ -156,7 +135,6 @@ class AppInfoViewModel(
             try { block() }
             catch (error: CancellationException) { throw error }
             catch (error: Exception) {
-                analytics.updateInstallResult(ResultCode.FAILURE, failureCategory(error))
                 mutable.value = mutable.value.copy(install = mutable.value.install.copy(error = installationError(error)))
             } finally { installBusy = false }
         }
@@ -174,7 +152,7 @@ class AppInfoViewModel(
                     releases = ((if (refresh) emptyList() else state.releases) + releases.releases).distinctBy { it.tag },
                     nextPage = page + 1, hasMore = releases.hasMore)
             } catch (error: CancellationException) { throw error }
-            catch (error: Exception) { analytics.networkFailure(NetworkOperation.UPDATE, failureCategory(error), HttpClass.UNKNOWN, RecoveryResult.FAILED); historyMutable.value = state.copy(error = failureFeedback(error, FailureOperation.UPDATE).text) }
+            catch (error: Exception) { historyMutable.value = state.copy(error = failureFeedback(error, FailureOperation.UPDATE).text) }
         }
     }
 }

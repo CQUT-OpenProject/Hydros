@@ -32,9 +32,6 @@ class MemoryStore : HydrosStore {
     var onboarding = false
     override suspend fun onboardingCompleted() = onboarding
     override suspend fun onboardingCompleted(value: Boolean) { onboarding = value }
-    var analytics = true
-    override suspend fun analyticsEnabled() = analytics
-    override suspend fun analyticsEnabled(value: Boolean) { analytics = value }
 }
 class ScriptTransport : CampusTransport {
     val requests=mutableListOf<Pair<String,Map<String,String>>>()

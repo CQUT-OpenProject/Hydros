@@ -104,14 +104,6 @@ jobs:
           keytool -exportcert -keystore "$ANDROID_KEYSTORE_PATH" -alias "$ANDROID_KEY_ALIAS" -storepass:env ANDROID_KEYSTORE_PASSWORD -file "$RUNNER_TEMP/hydros-signing.der"
           certificate="$(sha256sum "$RUNNER_TEMP/hydros-signing.der" | cut -d ' ' -f 1)"
           echo "certificate=$certificate" >> "$GITHUB_OUTPUT"
-      - name: Configure and validate Firebase
-        env:
-          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
-        run: |
-          set -euo pipefail
-          [[ -n "$GOOGLE_SERVICES_JSON_BASE64" ]] || { echo 'Missing repository secret: GOOGLE_SERVICES_JSON_BASE64'; exit 1; }
-          printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > app/google-services.json
-          python3 scripts/release.py firebase app/google-services.json
       - name: Reuse verified published APK on retry
         id: reuse
         env:

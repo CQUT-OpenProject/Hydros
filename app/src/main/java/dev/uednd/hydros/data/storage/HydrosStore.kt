@@ -27,7 +27,7 @@ import javax.crypto.spec.GCMParameterSpec
     val deviceRemarks: Map<String, String> = emptyMap())
 @Serializable data class FeedbackSettings(val hapticFeedbackEnabled: Boolean = true, val reduceMotionEnabled: Boolean = false)
 @Serializable private data class SavedSettings(val token: String? = null, val lastAccount: String? = null, val theme: String = "SYSTEM", val accounts: Map<String, SavedAccount> = emptyMap(), val onboardingCompleted: Boolean = false,
-    val analyticsEnabled: Boolean = true, val feedback: FeedbackSettings = FeedbackSettings(), val fontSizeScale: Float = 1f,
+    val feedback: FeedbackSettings = FeedbackSettings(), val fontSizeScale: Float = 1f,
     val postSessionDestination: String = PostSessionDestination.DEVICE.name)
 interface HydrosStore {
     suspend fun credentials(): Credentials?
@@ -43,8 +43,6 @@ interface HydrosStore {
     suspend fun fontSizeScale(value: Float)
     suspend fun onboardingCompleted(): Boolean = false
     suspend fun onboardingCompleted(value: Boolean) {}
-    suspend fun analyticsEnabled(): Boolean = true
-    suspend fun analyticsEnabled(value: Boolean) {}
     suspend fun postSessionDestination(): PostSessionDestination = PostSessionDestination.DEVICE
     suspend fun postSessionDestination(value: PostSessionDestination) {}
 }
@@ -91,8 +89,6 @@ class PreferencesHydrosStore(context: Context) : HydrosStore {
     }
     override suspend fun onboardingCompleted() = read().onboardingCompleted
     override suspend fun onboardingCompleted(value: Boolean) { edit { it.copy(onboardingCompleted = value) } }
-    override suspend fun analyticsEnabled() = read().analyticsEnabled
-    override suspend fun analyticsEnabled(value: Boolean) { edit { it.copy(analyticsEnabled = value) } }
     override suspend fun postSessionDestination(): PostSessionDestination {
         val saved = read().postSessionDestination
         return PostSessionDestination.entries.firstOrNull { it.name == saved } ?: PostSessionDestination.DEVICE

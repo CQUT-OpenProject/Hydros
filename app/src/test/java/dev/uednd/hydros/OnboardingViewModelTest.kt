@@ -1,9 +1,6 @@
 package dev.uednd.hydros
 
 import dev.uednd.hydros.data.HydrosDependencies
-import dev.uednd.hydros.data.network.Credentials
-import dev.uednd.hydros.data.analytics.AnalyticsTracker
-import dev.uednd.hydros.data.analytics.*
 import dev.uednd.hydros.data.repository.*
 import dev.uednd.hydros.ui.state.HydrosViewModel
 import kotlinx.coroutines.Dispatchers
@@ -80,45 +77,5 @@ class OnboardingViewModelTest {
         runCurrent()
 
         assertTrue("若已完成过引导，初始化后 onboardingCompleted 应直接为 true", model.state.value.onboardingCompleted)
-    }
-
-    @Test
-    fun declinedAnalyticsStaysOffAndAcceptedChoicePersistsAndCanBeRevoked() = runTest(dispatcher) {
-        val store = MemoryStore()
-        val analytics = RecordingAnalyticsTracker()
-        val transport = ScriptTransport(); val lock = Mutex()
-        val graph = HydrosDependencies(RealAuthRepository(transport, store), RealAccountRepository(transport),
-            RealWalletRepository(transport), RealDeviceRepository(transport, store, lock),
-            RealSessionRepository(transport, store, lock), store, this, analytics = analytics)
-        val model = HydrosViewModel(graph)
-        runCurrent()
-        assertTrue(store.analyticsEnabled()) // persisted default is on; collection still waits for onboarding
-
-        model.completeOnboarding(analyticsEnabled = false)
-        runCurrent()
-        assertFalse(analytics.enabledState)
-        assertFalse(store.analyticsEnabled())
-
-        model.setAnalyticsEnabled(true)
-        assertTrue("启用选择应立即放开 Analytics 收集", analytics.enabledState)
-        runCurrent()
-        assertEquals(listOf(true), analytics.consents)
-        assertEquals(listOf(true), analytics.consentStates)
-        assertTrue(store.analyticsEnabled())
-        assertTrue(analytics.enabledState)
-
-        val restartedModel = HydrosViewModel(graph)
-        runCurrent()
-        assertTrue(restartedModel.state.value.analyticsEnabled)
-        assertTrue(analytics.enabledState)
-
-        model.setAnalyticsEnabled(false)
-        assertFalse("撤回选择应立即停止 Analytics 收集", analytics.enabledState)
-        runCurrent()
-        assertFalse(analytics.enabledState)
-        assertFalse(store.analyticsEnabled())
-        assertEquals(listOf(true, false), analytics.consents)
-        // The opt-out is recorded while collection is still on; it could not be sent afterwards.
-        assertEquals(listOf(true, true), analytics.consentStates)
     }
 }

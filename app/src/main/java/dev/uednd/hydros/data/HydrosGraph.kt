@@ -23,14 +23,6 @@ import dev.uednd.hydros.data.update.AppInstaller
 import dev.uednd.hydros.data.update.AppUpdateSource
 import dev.uednd.hydros.data.update.GitHubAppUpdates
 import dev.uednd.hydros.data.update.AndroidUpdateManager
-import dev.uednd.hydros.data.analytics.AnalyticsTracker
-import dev.uednd.hydros.data.analytics.CrashReporter
-import dev.uednd.hydros.data.analytics.FirebaseAnalyticsTracker
-import dev.uednd.hydros.data.analytics.NoOpAnalyticsTracker
-import dev.uednd.hydros.data.analytics.ResultCode
-import dev.uednd.hydros.data.analytics.failureCategory
-import dev.uednd.hydros.data.analytics.toRecoveryStage
-import com.google.firebase.analytics.FirebaseAnalytics
 import androidx.camera.camera2.Camera2Config
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.CameraXConfig
@@ -54,17 +46,10 @@ class HydrosDependencies(
     val nearbyScanner: NearbyScanner = NoNearbyScanner,
     private val orderPush: () -> OrderPush = { NoOrderPush },
     val networkRecovery: NetworkRecovery? = null,
-    val analytics: AnalyticsTracker = NoOpAnalyticsTracker,
 ) {
     private val restoration = SessionRestoration(auth, sessions)
     suspend fun restore() = restoration.restore()
-    fun sessionMonitor() = SessionMonitor(auth.credentials, sessions, orderPush(),
-        onRecoveryFailure = { stage, error ->
-            stage.toRecoveryStage()?.let { recoveryStage ->
-                analytics.sessionRecoveryResult(recoveryStage, ResultCode.FAILURE,
-                    sessions.session.value?.recoveryReason, failureCategory(error))
-            }
-        })
+    fun sessionMonitor() = SessionMonitor(auth.credentials, sessions, orderPush())
 }
 
 open class HydrosApplication : Application(), CameraXConfig.Provider {
@@ -84,25 +69,7 @@ open class HydrosApplication : Application(), CameraXConfig.Provider {
     override fun onCreate() {
         super.onCreate()
         dependencies = buildDependencies()
-        // Manifest defaults are on; gate immediately until the persisted choice is read.
-        dependencies.analytics.setCollectionEnabled(false)
-        CrashReporter.setCollectionEnabled(false)
-        restoreTelemetryConsent()
         warmUpScanner()
-    }
-
-    /**
-     * Collection follows the manifest default until onboarding and the analytics toggle are applied.
-     * The ViewModel reapplies the same choice after its state load and on every user change.
-     */
-    private fun restoreTelemetryConsent() {
-        dependencies.scope.launch {
-            val enabled = runCatching {
-                dependencies.store.onboardingCompleted() && dependencies.store.analyticsEnabled()
-            }.getOrDefault(false)
-            dependencies.analytics.setCollectionEnabled(enabled)
-            CrashReporter.setCollectionEnabled(enabled)
-        }
     }
 
     protected open fun warmUpScanner() {
@@ -115,16 +82,13 @@ open class HydrosApplication : Application(), CameraXConfig.Provider {
 fun createDependencies(app: Application): HydrosDependencies {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val store = PreferencesHydrosStore(app)
-    val analytics: AnalyticsTracker = if (BuildConfig.DEBUG) NoOpAnalyticsTracker else FirebaseAnalyticsTracker(FirebaseAnalytics.getInstance(app))
     val operation = Mutex()
     lateinit var auth: RealAuthRepository
-    lateinit var transport: HttpCampusTransport
     val recovery = NetworkRecovery(AndroidNetworkAccess(app, BuildConfig.CAMPUS_BASE_URL), diagnose = {
         android.util.Log.i("HydrosNetwork", "path=${it.path} stage=${it.stage} network=${if (it.cellular) "cellular" else "default"} elapsedMs=${it.elapsedMillis} http=${it.httpCode} business=${it.businessCode} failure=${it.failure ?: "none"}")
-    }, onCellularSuccess = { transport.reportRecovery(it) })
-    transport = HttpCampusTransport(CampusApiFactory.create(BuildConfig.CAMPUS_BASE_URL),
-        isCurrent = { auth.credentials.value == it }, recovery = recovery, onExpired = { auth.expire(it) },
-        onDiagnostic = { operation, failure, httpClass, result -> analytics.networkFailure(operation, failure, httpClass, result) })
+    })
+    val transport = HttpCampusTransport(CampusApiFactory.create(BuildConfig.CAMPUS_BASE_URL),
+        isCurrent = { auth.credentials.value == it }, recovery = recovery, onExpired = { auth.expire(it) })
     val sessions = RealSessionRepository(transport, store, operation)
     auth = RealAuthRepository(transport, store) { candidate ->
         val pending = sessions.session.value
@@ -143,7 +107,6 @@ fun createDependencies(app: Application): HydrosDependencies {
         scope = scope,
         ensureWatch = { SessionWatchService.start(app) },
         nearbyScanner = AndroidNearbyScanner(app),
-        analytics = analytics,
         orderPush = { MqttOrderPush() },
         networkRecovery = recovery,
     )

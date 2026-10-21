@@ -54,9 +54,7 @@ fun AboutScreen(
     onPrivacy: () -> Unit,
     onDeveloper: () -> Unit,
     appData: AppDataControl,
-    onClear: () -> Boolean,
-    analyticsEnabled: Boolean,
-    onAnalyticsEnabled: (Boolean) -> Unit
+    onClear: () -> Boolean
 ) {
     val snackbar = LocalHydrosSnackbar.current
     var developerPageTapCount by remember { mutableIntStateOf(0) }
@@ -94,8 +92,6 @@ fun AboutScreen(
                 trailing = if (dataBytes == null) ({ CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) }) else null)
         }
         Section("软件信息") {
-            SwitchRow("匿名使用统计", checked = analyticsEnabled, onCheckedChange = onAnalyticsEnabled)
-            SubtleDivider()
             MineRow("服务协议", onClick = onTerms)
             SubtleDivider()
             MineRow("隐私政策", onClick = onPrivacy)

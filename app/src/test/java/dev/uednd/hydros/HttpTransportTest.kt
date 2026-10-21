@@ -1,6 +1,5 @@
 package dev.uednd.hydros
 
-import dev.uednd.hydros.data.analytics.NetworkOperation
 import dev.uednd.hydros.data.network.*
 import dev.uednd.hydros.data.repository.*
 import kotlinx.coroutines.test.runTest
@@ -14,20 +13,6 @@ import org.junit.Test
 // MockWebServer uses real sockets; virtual time can expire a query before its callback runs.
 class HttpTransportTest {
     private val auth=Credentials("test-token","1","2","3","13800138000")
-    @Test fun diagnosticsDistinguishAccountChangesFromLoginAndVerification() = runBlocking {
-        val server = MockWebServer(); server.start()
-        try {
-            val paths = listOf("user/phone/update", "user/password/update", "user/password/forget",
-                "account/info", "project/info/triple", "user/login", "user/verification/code/get")
-            paths.forEach { server.enqueue(MockResponse.Builder().body("""{"success":false,"errorCode":12}""").build()) }
-            val operations = mutableListOf<NetworkOperation>()
-            val transport = HttpCampusTransport(CampusApiFactory.create(server.url("/").toString()),
-                onDiagnostic = { operation, _, _, _ -> operations += operation }, onExpired = { fail("Unexpected expiry") })
-            paths.forEach { transport.post(it) }
-            assertEquals(List(5) { NetworkOperation.ACCOUNT } +
-                List(2) { NetworkOperation.LOGIN }, operations)
-        } finally { server.close() }
-    }
     @Test fun getAndPostCarryAuthAndSmsKeepsTargetSeparate()=runBlocking {
         val server=MockWebServer(); server.start()
         try {

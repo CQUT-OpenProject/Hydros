@@ -1,10 +1,8 @@
 package dev.uednd.hydros.ui.state
 
 import dev.uednd.hydros.data.feedback.*
-import dev.uednd.hydros.data.analytics.CrashReporter
 import dev.uednd.hydros.data.storage.FeedbackSettings
 import dev.uednd.hydros.data.storage.PostSessionDestination
-import dev.uednd.hydros.data.repository.AuthState
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.uednd.hydros.data.HydrosDependencies
@@ -14,9 +12,6 @@ import dev.uednd.hydros.data.repository.BillHistory
 import dev.uednd.hydros.data.repository.DevicePreparation
 import dev.uednd.hydros.data.repository.NearbyDiscovery
 import dev.uednd.hydros.data.repository.NearbyDiscoveryState
-import dev.uednd.hydros.data.analytics.*
-import dev.uednd.hydros.ui.state.ControlChannel
-import dev.uednd.hydros.ui.state.DeviceCategory
 import dev.uednd.hydros.ui.theme.ThemeMode
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -24,7 +19,6 @@ import java.time.YearMonth
 
 data class HydrosUiState(val initializing: Boolean = true, val signedIn: Boolean = false,
     val onboardingCompleted: Boolean = false, val reauthentication: ReauthenticationNotice? = null,
-    val analyticsEnabled: Boolean = true,
     val account: AccountUi = AccountUi(), val wallet: WalletUi = WalletUi(), val devices: List<DeviceUi> = emptyList(),
     val connectedDeviceIds: List<String> = emptyList(), val favoriteDeviceIds: Set<String> = emptySet(),
     val deviceRemarks: Map<String, String> = emptyMap(),
@@ -50,14 +44,10 @@ class HydrosViewModel(
 ) : ViewModel() {
     private var postSessionNavigationDismissed = false
     private var lastActionError: Exception? = null
-    private var pendingConnectEntry = ConnectEntry.LIST
-    private var lastConnectEntry = ConnectEntry.LIST
-    private var lastNearbyScanReported = 0L
     private val mutable = MutableStateFlow(HydrosUiState())
     val state = mutable.asStateFlow()
     private val refreshJobs = mutableListOf<Job>()
-    private val billHistory = BillHistory(graph.wallet, graph.auth.credentials, viewModelScope,
-        onQueryResult = { scope, result, failure -> graph.analytics.billQueryResult(scope, result, failure) })
+    private val billHistory = BillHistory(graph.wallet, graph.auth.credentials, viewModelScope)
     private var walletGeneration = 0
     private val discovery = NearbyDiscovery(graph.nearbyScanner, graph.devices, graph.auth.credentials, viewModelScope)
     private val preparation = DevicePreparation(
@@ -91,12 +81,6 @@ class HydrosViewModel(
             discovery.state.collect { nearby ->
                 val resolved = nearby.devices.filter { it !in previous }
                 previous = nearby.devices
-                if (nearby.completed && nearby.scanGeneration != lastNearbyScanReported) {
-                    lastNearbyScanReported = nearby.scanGeneration
-                    graph.analytics.nearbyScanResult(
-                        if (nearby.error == null && !nearby.scanFailed) ResultCode.SUCCESS else ResultCode.FAILURE,
-                        nearby.devices.size, nearby.error?.let(::failureCategory))
-                }
                 mutable.update { current -> current.copy(
                     nearby = nearby,
                     devices = current.devices.filterNot { old -> resolved.any { it.id == old.id } } + resolved,
@@ -105,28 +89,13 @@ class HydrosViewModel(
             }
         }
         viewModelScope.launch {
-            var priorAuth: AuthState? = null
-            graph.auth.authState.collect { authentication ->
-                if (priorAuth?.credentials != null && authentication.credentials == null && authentication.reauthentication != null) {
-                    val reason = when (authentication.reauthentication.reason) {
-                        dev.uednd.hydros.data.repository.ReauthenticationReason.ACCOUNT_CHANGED -> AuthEndReason.ACCOUNT_CHANGED
-                        dev.uednd.hydros.data.repository.ReauthenticationReason.EXPIRED -> AuthEndReason.EXPIRED
-                    }
-                    graph.analytics.authSessionEnd(reason)
-                }
-                priorAuth = authentication
-            }
-        }
-        viewModelScope.launch {
             try {
                 val theme = runCatching { ThemeMode.valueOf(graph.store.theme()) }.getOrDefault(ThemeMode.SYSTEM)
                 val onboarding = graph.store.onboardingCompleted()
-                val analyticsEnabled = graph.store.analyticsEnabled()
-                applyPrivacyTelemetry(onboarding && analyticsEnabled)
                 val feedback = graph.store.feedback()
                 val fontSizeScale = graph.store.fontSizeScale()
                 val postSessionDestination = runCatching { graph.store.postSessionDestination() }.getOrDefault(PostSessionDestination.DEVICE)
-                mutable.update { it.copy(theme=theme, onboardingCompleted=onboarding, analyticsEnabled=analyticsEnabled, feedback=feedback,
+                mutable.update { it.copy(theme=theme, onboardingCompleted=onboarding, feedback=feedback,
                     fontSizeScale=fontSizeScale, postSessionDestination=postSessionDestination) }
                 graph.restore()
                 graph.auth.authState.collectLatest { authentication ->
@@ -145,7 +114,6 @@ class HydrosViewModel(
                     val saved = auth?.let { graph.store.account(it.key) }
                     mutable.update { current -> HydrosUiState(initializing=false, signedIn=auth != null,
                         onboardingCompleted=current.onboardingCompleted, reauthentication=authentication.reauthentication,
-                        analyticsEnabled=current.analyticsEnabled,
                         theme=current.theme, feedback=current.feedback, fontSizeScale=current.fontSizeScale,
                         postSessionDestination=current.postSessionDestination,
                         account=AccountUi(phone=auth?.phone ?: ""), devices=saved?.devices ?: emptyList(),
@@ -157,10 +125,6 @@ class HydrosViewModel(
         }
         viewModelScope.launch {
             var prior: SessionUi? = null
-            // A recovery can pass through transient stages (for example CLOSE_UNCONFIRMED ->
-            // SETTLING -> null), so remember the last recovery stage until it resolves.
-            var pendingRecoveryStage: SessionRecoveryStage? = null
-            var pendingRecoveryReason: SessionRecoveryReason? = null
             graph.sessions.session.collect { value ->
                 val auth = graph.auth.credentials.value
                 val finished = when {
@@ -174,58 +138,18 @@ class HydrosViewModel(
                     postSessionBillId = if (value == null) current.postSessionBillId else null) }
                 // Refresh first: the bill lookup replaces the list selection it may still be loading.
                 if(prior != null && value == null && auth != null) refresh()
-                val previousSession = prior
-                previousSession?.stage?.toRecoveryStage()?.let { stage ->
-                    if (previousSession.ownerKey == auth?.key) {
-                        pendingRecoveryStage = stage
-                        pendingRecoveryReason = previousSession.recoveryReason
-                    }
-                }
-                pendingRecoveryStage?.let { stage ->
-                    val recovered = when (stage) {
-                        SessionRecoveryStage.OPEN_UNCONFIRMED -> value?.stage == SessionStage.USING
-                        SessionRecoveryStage.CLOSE_UNCONFIRMED,
-                        SessionRecoveryStage.SETTLEMENT_PENDING,
-                        SessionRecoveryStage.WRITEBACK_PENDING -> value == null && finished != null
-                    }
-                    if (recovered) {
-                        graph.analytics.sessionRecoveryResult(stage, ResultCode.SUCCESS, pendingRecoveryReason)
-                    }
-                    // Failures are reported by SessionMonitor when a reconciliation throws; here we
-                    // only stop tracking once the session resolves or disappears (logout/switch).
-                    if (recovered || value == null) {
-                        pendingRecoveryStage = null
-                        pendingRecoveryReason = null
-                    }
-                }
-                if (finished != null) {
-                    val destination = graph.store.postSessionDestination()
-                    if (destination != PostSessionDestination.BILL) {
-                        graph.analytics.postSessionNavResult(destination, PostSessionNavResult.SKIPPED)
-                    } else {
-                        graph.scope.launch {
-                            postSessionNavigationDismissed = false
-                            mutable.update { it.copy(resolvingPostSessionDestination = true) }
-                            resolveFinishedBill(finished)
-                        }
+                if (finished != null && graph.store.postSessionDestination() == PostSessionDestination.BILL) {
+                    graph.scope.launch {
+                        postSessionNavigationDismissed = false
+                        mutable.update { it.copy(resolvingPostSessionDestination = true) }
+                        resolveFinishedBill(finished)
                     }
                 }
                 prior = value
             }
         }
         viewModelScope.launch {
-            var previousConnection = ConnectionStage.IDLE
-            var previousDevice: DeviceUi? = null
             preparation.state.collect { connection ->
-                val device = connection.device ?: previousDevice
-                if (previousConnection == ConnectionStage.CONNECTING && connection.stage in setOf(ConnectionStage.READY, ConnectionStage.FAILED) && device != null) {
-                    graph.analytics.deviceConnectResult(
-                        if (connection.stage == ConnectionStage.READY) ResultCode.SUCCESS else ResultCode.FAILURE,
-                        if (device.channel == ControlChannel.BLE) Channel.BLE else Channel.CLOUD,
-                        device.category.toAnalyticsType(), lastConnectEntry, connection.error?.let(::failureCategory))
-                }
-                if (connection.device != null) previousDevice = connection.device
-                previousConnection = connection.stage
                 mutable.update { current ->
                     val ready = connection.device?.takeIf { connection.stage == ConnectionStage.READY }
                     val devices = if (ready == null) current.devices else {
@@ -245,11 +169,6 @@ class HydrosViewModel(
         }
     }
     private fun friendly(error: Exception) = failureFeedback(error, FailureOperation.BILLS).text
-    private fun applyPrivacyTelemetry(enabled: Boolean) {
-        graph.analytics.setCollectionEnabled(enabled)
-        CrashReporter.setCollectionEnabled(enabled)
-    }
-    fun scheduleConnect(entry: ConnectEntry) { pendingConnectEntry = entry }
     private fun resolveFinishedBill(session: SessionUi) {
         viewModelScope.launch {
             // Wrap the result: withTimeoutOrNull returns null on timeout, while a completed lookup
@@ -263,13 +182,6 @@ class HydrosViewModel(
                 mutable.update { it.copy(resolvingPostSessionDestination = false) }
                 return@launch
             }
-            val destination = graph.store.postSessionDestination()
-            val navResult = when {
-                located == null -> PostSessionNavResult.TIMEOUT
-                bill != null -> PostSessionNavResult.FOUND
-                else -> PostSessionNavResult.NOT_FOUND
-            }
-            graph.analytics.postSessionNavResult(destination, navResult)
             // Publish the located month together with the bill id so the detail page can render it at once.
             val history = billHistory.state.value
             mutable.update { it.copy(month = history.month, billType = history.type,
@@ -295,11 +207,7 @@ class HydrosViewModel(
         cancelConnection()
         stopDiscovery()
         val requested = runCatching(clear).getOrDefault(false)
-        if (requested) graph.analytics.dataClearResult(ResultCode.SUCCESS)
-        else {
-            graph.analytics.dataClearResult(ResultCode.FAILURE)
-            mutable.update { it.copy(message = "清除失败，请重试") }
-        }
+        if (!requested) mutable.update { it.copy(message = "清除失败，请重试") }
         return requested
     }
     suspend fun action(allowRecovery: Boolean = false, operation: FailureOperation = FailureOperation.SETTINGS, block: suspend () -> Unit): Boolean {
@@ -328,17 +236,8 @@ class HydrosViewModel(
         }
         finally { mutable.update { it.copy(working=false) } }
     }
-    suspend fun login(phone: String, secret: String, sms: Boolean): Boolean {
-        val method = if (sms) LoginMethod.SMS else LoginMethod.PASSWORD
-        val ok = action(operation = FailureOperation.LOGIN) { graph.auth.login(phone, secret, sms) }
-        // A skipped action (already busy or awaiting re-authentication) is not a login attempt.
-        if (ok || lastActionError != null) graph.analytics.loginResult(
-            if (ok) ResultCode.SUCCESS else ResultCode.FAILURE,
-            method,
-            if (ok) null else lastActionError?.let(::failureCategory),
-        )
-        return ok
-    }
+    suspend fun login(phone: String, secret: String, sms: Boolean): Boolean =
+        action(operation = FailureOperation.LOGIN) { graph.auth.login(phone, secret, sms) }
     suspend fun sendCode(phone: String, type: Int) = action(operation = FailureOperation.CODE) { graph.auth.sendCode(phone, type) }
     suspend fun saveAccount(form: dev.uednd.hydros.ui.screens.AccountForm, phone: String, old: String, password: String, code: String) = action(operation = FailureOperation.ACCOUNT) {
         if(state.value.session != null) throw ApiFailure(null, "请先结束当前设备使用，再修改账户")
@@ -351,39 +250,28 @@ class HydrosViewModel(
         }
     }
     fun theme(mode: ThemeMode) { graph.scope.launch {
-        if (action { graph.store.theme(mode.name); mutable.update { it.copy(theme=mode) } })
-            graph.analytics.settingsChange(SettingsKey.THEME, mode.name)
+        action { graph.store.theme(mode.name); mutable.update { it.copy(theme=mode) } }
     } }
     fun postSessionDestination(destination: PostSessionDestination) { graph.scope.launch {
-        if (action {
+        action {
             graph.store.postSessionDestination(destination)
             mutable.update { it.copy(postSessionDestination = destination) }
-        }) graph.analytics.settingsChange(SettingsKey.POST_SESSION_DEST, destination.name)
+        }
     } }
     fun consumePostSessionBill() { mutable.update { it.copy(postSessionBillId = null) } }
     fun dismissPostSessionNavigation() {
-        val current = state.value
-        val resolving = current.resolvingPostSessionDestination &&
-            current.postSessionDestination == PostSessionDestination.BILL
         postSessionNavigationDismissed = true
-        if (resolving) graph.analytics.postSessionNavResult(current.postSessionDestination, PostSessionNavResult.DISMISSED)
         mutable.update { it.copy(resolvingPostSessionDestination = false, postSessionBillId = null) }
     }
     fun hapticFeedback(enabled: Boolean) {
         updateFeedback { it.copy(hapticFeedbackEnabled = enabled) }
-        graph.analytics.settingsChange(SettingsKey.HAPTIC, enabled.toString())
     }
-    suspend fun fontSizeScale(value: Float): Boolean {
-        val ok = action {
-            graph.store.fontSizeScale(value)
-            mutable.update { it.copy(fontSizeScale = value) }
-        }
-        if (ok) graph.analytics.settingsChange(SettingsKey.FONT_SCALE, fontScaleBucket(value))
-        return ok
+    suspend fun fontSizeScale(value: Float): Boolean = action {
+        graph.store.fontSizeScale(value)
+        mutable.update { it.copy(fontSizeScale = value) }
     }
     fun reduceMotion(enabled: Boolean) {
         updateFeedback { it.copy(reduceMotionEnabled = enabled) }
-        graph.analytics.settingsChange(SettingsKey.REDUCE_MOTION, enabled.toString())
     }
     private fun updateFeedback(transform: (FeedbackSettings) -> FeedbackSettings) {
         graph.scope.launch { action {
@@ -391,77 +279,30 @@ class HydrosViewModel(
             mutable.update { it.copy(feedback = feedback) }
         } }
     }
-    fun completeOnboarding(analyticsEnabled: Boolean = true) { graph.scope.launch { action {
-        graph.store.analyticsEnabled(analyticsEnabled)
+    fun completeOnboarding() { graph.scope.launch { action {
         graph.store.onboardingCompleted(true)
-        applyPrivacyTelemetry(analyticsEnabled)
-        mutable.update { it.copy(onboardingCompleted = true, analyticsEnabled = analyticsEnabled) }
-        if (analyticsEnabled) {
-            graph.analytics.onboardingComplete()
-            graph.analytics.analyticsConsentChange(true)
-        }
+        mutable.update { it.copy(onboardingCompleted = true) }
     } } }
-    fun setAnalyticsEnabled(enabled: Boolean) {
-        val wasEnabled = state.value.analyticsEnabled && state.value.onboardingCompleted
-        if (enabled) {
-            // Enable before persisting so a failed save can be rolled back to `wasEnabled`.
-            applyPrivacyTelemetry(state.value.onboardingCompleted)
-        } else {
-            // The opt-out cannot be delivered once collection is off; record it first.
-            if (wasEnabled) graph.analytics.analyticsConsentChange(false)
-            applyPrivacyTelemetry(false)
-        }
-        graph.scope.launch {
-            val ok = action {
-                graph.store.analyticsEnabled(enabled)
-                mutable.update { it.copy(analyticsEnabled = enabled) }
-            }
-            if (ok) {
-                applyPrivacyTelemetry(enabled && state.value.onboardingCompleted)
-                if (enabled) graph.analytics.analyticsConsentChange(true)
-            } else {
-                applyPrivacyTelemetry(wasEnabled)
-                // The setting stayed enabled after a failed save, so restore the recorded state.
-                if (!enabled && wasEnabled) graph.analytics.analyticsConsentChange(true)
-            }
-        }
-    }
     fun logout() {
         graph.scope.launch {
-            if (action {
+            action {
                 if(graph.sessions.session.value != null) throw ApiFailure(null, "请先结束或恢复当前设备会话")
                 cancelConnection(); graph.auth.logout()
-            }) graph.analytics.authSessionEnd(AuthEndReason.LOGOUT)
+            }
         }
     }
     fun toggleFavorite(deviceId: String) {
         graph.scope.launch {
-            val removing = deviceId in state.value.favoriteDeviceIds
-            // The store is authoritative: the UI snapshot may be stale after an account switch.
-            var actionType: DeviceListAction? = null
-            val ok = action(operation = FailureOperation.FAVORITE) {
+            action(operation = FailureOperation.FAVORITE) {
                 val auth = graph.auth.requireCredentials()
                 val saved = graph.store.updateAccount(auth.key) {
                     when {
-                        deviceId in it.favorites -> {
-                            actionType = DeviceListAction.UNFAVORITE
-                            it.copy(favorites = it.favorites - deviceId, deviceRemarks = it.deviceRemarks - deviceId)
-                        }
-                        deviceId in it.recent -> {
-                            actionType = DeviceListAction.FAVORITE
-                            it.copy(favorites = it.favorites + deviceId)
-                        }
+                        deviceId in it.favorites -> it.copy(favorites = it.favorites - deviceId, deviceRemarks = it.deviceRemarks - deviceId)
+                        deviceId in it.recent -> it.copy(favorites = it.favorites + deviceId)
                         else -> it
                     }
                 }
                 if(graph.auth.credentials.value == auth) mutable.update { it.copy(favoriteDeviceIds=saved.favorites, deviceRemarks=saved.deviceRemarks) }
-            }
-            val changed = actionType
-            when {
-                ok -> changed?.let { graph.analytics.deviceListAction(it, ResultCode.SUCCESS) }
-                lastActionError != null -> graph.analytics.deviceListAction(
-                    changed ?: if (removing) DeviceListAction.UNFAVORITE else DeviceListAction.FAVORITE,
-                    ResultCode.FAILURE)
             }
         }
     }
@@ -478,28 +319,18 @@ class HydrosViewModel(
             if (graph.auth.credentials.value != auth) throw ApiFailure(null, "账号已切换，请重试")
             mutable.update { it.copy(deviceRemarks = saved.deviceRemarks) }
         }
-        if (ok || lastActionError != null) graph.analytics.deviceListAction(
-            DeviceListAction.REMARK, if (ok) ResultCode.SUCCESS else ResultCode.FAILURE)
         return ok
     }
     suspend fun scan(mac: String, rssi: Int? = null): String? {
         val auth = graph.auth.credentials.value ?: return null
-        return try {
-            val device = graph.devices.find(auth, mac, if(rssi != null) mac else null, rssi)
-            if(graph.auth.credentials.value != auth) return null
-            mutable.update { it.copy(devices=it.devices.filterNot { d -> d.id == device.id } + device) }
-            graph.analytics.qrScanResult(ResultCode.SUCCESS)
-            device.id
-        } catch(e: CancellationException) { throw e } catch(e: Exception) {
-            graph.analytics.qrScanResult(ResultCode.FAILURE, failureCategory(e))
-            throw e
-        }
+        val device = graph.devices.find(auth, mac, if(rssi != null) mac else null, rssi)
+        if(graph.auth.credentials.value != auth) return null
+        mutable.update { it.copy(devices=it.devices.filterNot { d -> d.id == device.id } + device) }
+        return device.id
     }
     fun discoverNearby() = discovery.start()
     fun stopDiscovery() = discovery.stop()
-    fun connect(device: DeviceUi, entry: ConnectEntry? = null) {
-        lastConnectEntry = entry ?: pendingConnectEntry
-        pendingConnectEntry = ConnectEntry.LIST
+    fun connect(device: DeviceUi) {
         discovery.stop()
         if (state.value.deviceActionError != null) preparation.cancel()
         mutable.update { it.copy(deviceActionError=null) }
@@ -524,36 +355,14 @@ class HydrosViewModel(
     fun start(device: DeviceUi) {
         if (state.value.working || state.value.session != null) return
         graph.scope.launch {
-            val completed = action(operation = FailureOperation.START) {
+            action(operation = FailureOperation.START) {
                 preparation.startSession(device.id)
             }
-            val current = graph.sessions.session.value
-            val result = when {
-                current?.stage == SessionStage.USING -> ResultCode.SUCCESS
-                current?.stage == SessionStage.OPEN_UNCONFIRMED -> ResultCode.PENDING
-                else -> ResultCode.FAILURE
-            }
-            val session = graph.sessions.session.value
-            // A skipped action (busy or re-authenticating) never sent a start request.
-            if (completed || lastActionError != null) graph.analytics.sessionStartResult(
-                result, device.channel.toAnalyticsChannel(), device.category.toAnalyticsType(),
-                if (completed) null else lastActionError?.let(::failureCategory),
-                if (result == ResultCode.PENDING) session?.recoveryReason else null)
         }
     }
     fun finish() { if(!state.value.working) graph.scope.launch {
-        val session = graph.sessions.session.value ?: return@launch
-        val completed = action(allowRecovery = true, operation = FailureOperation.FINISH) { graph.ensureWatch(); graph.sessions.finish(graph.auth.credentials.value) }
-        val current = graph.sessions.session.value
-        val result = when {
-            current == null && completed -> ResultCode.SUCCESS
-            current?.stage in setOf(SessionStage.CLOSE_UNCONFIRMED, SessionStage.SETTLEMENT_PENDING, SessionStage.WRITEBACK_PENDING) -> ResultCode.PENDING
-            else -> ResultCode.FAILURE
-        }
-        if (completed || lastActionError != null) graph.analytics.sessionFinishResult(
-            result, session.device.channel.toAnalyticsChannel(), session.device.category.toAnalyticsType(),
-            if (completed) null else lastActionError?.let(::failureCategory),
-            if (result == ResultCode.PENDING) current?.recoveryReason ?: session.recoveryReason else null)
+        if (graph.sessions.session.value == null) return@launch
+        action(allowRecovery = true, operation = FailureOperation.FINISH) { graph.ensureWatch(); graph.sessions.finish(graph.auth.credentials.value) }
     } }
     /** A foreground return may complete an interrupted read, but never replays a user command. */
     fun recoverQueries(visibleBillId: String? = null) {
@@ -597,12 +406,6 @@ class HydrosViewModel(
 }
 /** Distinguishes a timed-out lookup from a completed lookup that found no matching bill. */
 private class LocatedBill(val bill: BillUi?)
-private fun DeviceCategory.toAnalyticsType() = when (this) {
-    DeviceCategory.SHOWER -> DeviceType.SHOWER
-    DeviceCategory.DRINK -> DeviceType.DRINK
-    DeviceCategory.WASH -> DeviceType.WASH
-}
-private fun ControlChannel.toAnalyticsChannel() = if (this == ControlChannel.BLE) Channel.BLE else Channel.CLOUD
 fun phoneError(value: String): String? = if(Regex("1[3-9]\\d{9}").matches(value)) null else "请输入 11 位手机号"
 fun passwordError(value: String): String? = if(value.length in 6..32 && value.any { !it.isWhitespace() }) null else "请输入 6–32 位密码"
 fun codeError(value: String): String? = if(Regex("\\d{6}").matches(value)) null else "请输入 6 位验证码"

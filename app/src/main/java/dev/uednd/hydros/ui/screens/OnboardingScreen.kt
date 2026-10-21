@@ -38,14 +38,13 @@ private const val STEP_COUNT = 4
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OnboardingScreen(
-    onComplete: (Boolean) -> Unit,
+    onComplete: () -> Unit,
     onTerms: () -> Unit = {},
     onPrivacy: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var currentStep by rememberSaveable { mutableIntStateOf(0) }
     var agreedToLegal by rememberSaveable { mutableStateOf(false) }
-    var analyticsEnabled by rememberSaveable { mutableStateOf(true) }
 
     val reduceMotion = LocalFeedbackSettings.current.reduceMotionEnabled
     val context = LocalContext.current
@@ -147,7 +146,7 @@ fun OnboardingScreen(
                         3 -> {
                             PrimaryAction(
                                 label = "开始使用",
-                                onClick = { onComplete(analyticsEnabled) },
+                                onClick = { onComplete() },
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -175,8 +174,6 @@ fun OnboardingScreen(
                 1 -> LegalStep(
                     agreed = agreedToLegal,
                     onToggleAgreed = { agreedToLegal = it },
-                    analyticsEnabled = analyticsEnabled,
-                    onAnalyticsEnabled = { analyticsEnabled = it },
                     onTerms = onTerms,
                     onPrivacy = onPrivacy
                 )
@@ -232,8 +229,6 @@ private fun WelcomeStep() {
 private fun LegalStep(
     agreed: Boolean,
     onToggleAgreed: (Boolean) -> Unit,
-    analyticsEnabled: Boolean,
-    onAnalyticsEnabled: (Boolean) -> Unit,
     onTerms: () -> Unit,
     onPrivacy: () -> Unit
 ) {
@@ -281,20 +276,10 @@ private fun LegalStep(
                 SubtleDivider()
                 MineRow(
                     title = "隐私政策",
-                    supporting = "了解数据收集、存储与系统权限说明",
+                    supporting = "了解信息处理、存储与系统权限说明",
                     icon = R.drawable.ic_shield,
                     tone = IconTone.PRIMARY,
                     onClick = onPrivacy
-                )
-            }
-
-            Section {
-                SwitchRow(
-                    title = "匿名使用统计",
-                    supporting = "默认开启；用于 Firebase Analytics 与 Crashlytics 收集去标识化使用与崩溃信息，可随时关闭。",
-                    checked = analyticsEnabled,
-                    onCheckedChange = onAnalyticsEnabled,
-                    switchTag = "analytics-consent"
                 )
             }
 

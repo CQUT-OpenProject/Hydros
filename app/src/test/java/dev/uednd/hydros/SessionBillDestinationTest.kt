@@ -2,7 +2,6 @@ package dev.uednd.hydros
 
 import androidx.lifecycle.ViewModelStore
 import dev.uednd.hydros.data.HydrosDependencies
-import dev.uednd.hydros.data.analytics.PostSessionNavResult
 import dev.uednd.hydros.data.network.ApiResponse
 import dev.uednd.hydros.data.network.Credentials
 import dev.uednd.hydros.data.repository.BillHistory
@@ -217,14 +216,12 @@ class SessionBillDestinationTest {
         val store: DestinationStore,
         val transport: ScriptTransport,
         val sessions: RealSessionRepository,
-        val analytics: RecordingAnalyticsTracker,
     )
 
     private fun createModel(
         scope: TestScope,
         consumeDate: String,
         postSessionDestination: PostSessionDestination = PostSessionDestination.DEVICE,
-        analytics: RecordingAnalyticsTracker = RecordingAnalyticsTracker(),
         billList: suspend (Map<String, String>) -> ApiResponse<JsonElement>,
     ): ViewModelFixture {
         val credentials = auth
@@ -258,8 +255,8 @@ class SessionBillDestinationTest {
         val sessions = RealSessionRepository(transport, store, lock, confirmationAttempts = 2, pause = {})
         val graph = HydrosDependencies(RealAuthRepository(transport, store), RealAccountRepository(transport),
             RealWalletRepository(transport), RealDeviceRepository(transport, store, lock), sessions, store,
-            scope.backgroundScope, analytics = analytics)
-        return ViewModelFixture(HydrosViewModel(graph), store, transport, sessions, analytics)
+            scope.backgroundScope)
+        return ViewModelFixture(HydrosViewModel(graph), store, transport, sessions)
     }
 
     @Test fun billDestinationPublishesTheResolvedBillAndMonthForDirectNavigation() = runTest {
@@ -343,8 +340,6 @@ class SessionBillDestinationTest {
             assertFalse(state.resolvingPostSessionDestination)
             assertEquals(currentMonth.toString(), state.month)
             assertTrue(state.bills.isEmpty())
-            assertEquals("a completed lookup without a match is not a timeout",
-                listOf(PostSessionDestination.BILL to PostSessionNavResult.NOT_FOUND), fixture.analytics.postSessionNav)
         } finally {
             models.clear(); runCurrent(); Dispatchers.resetMain()
         }
@@ -405,28 +400,6 @@ class SessionBillDestinationTest {
             val state = fixture.model.state.value
             assertFalse(state.resolvingPostSessionDestination)
             assertNull(state.postSessionBillId)
-            assertEquals(listOf(PostSessionDestination.BILL to PostSessionNavResult.TIMEOUT),
-                fixture.analytics.postSessionNav)
-        } finally {
-            models.clear(); runCurrent(); Dispatchers.resetMain()
-        }
-    }
-
-    @Test fun leavingWithoutAPendingBillResolutionDoesNotReportDismissal() = runTest {
-        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        val models = ViewModelStore()
-        try {
-            val currentMonth = YearMonth.now()
-            val fixture = createModel(this, "$currentMonth-15 12:00:00") { _ -> response("[]") }
-            models.put("hydros", fixture.model)
-            advanceUntilIdle()
-            fixture.sessions.finish(auth)
-            advanceUntilIdle()
-
-            fixture.model.dismissPostSessionNavigation()
-            advanceUntilIdle()
-
-            assertFalse(fixture.analytics.postSessionNav.any { it.second == PostSessionNavResult.DISMISSED })
         } finally {
             models.clear(); runCurrent(); Dispatchers.resetMain()
         }

@@ -4,7 +4,6 @@ import dev.uednd.hydros.data.feedback.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import java.math.BigDecimal
-import dev.uednd.hydros.data.analytics.*
 
 @Serializable data class Credentials(val loginCode: String, val userId: String, val accountId: String, val projectId: String, val phone: String) {
     val key get() = "$projectId:$accountId:$userId"
@@ -22,7 +21,6 @@ interface CampusTransport {
 }
 class HttpCampusTransport(private val api: CampusApi, private val isCurrent: (Credentials) -> Boolean = { true },
     private val recovery: NetworkRecovery? = null,
-    private val onDiagnostic: (NetworkOperation, FailureCategory, HttpClass, RecoveryResult) -> Unit = { _, _, _, _ -> },
     private val onExpired: suspend (Credentials) -> Unit) : CampusTransport {
     override suspend fun get(path: String, fields: Map<String, String>, auth: Credentials?) = call(false, path, fields, auth)
     override suspend fun post(path: String, fields: Map<String, String>, auth: Credentials?) = call(true, path, fields, auth)
@@ -60,27 +58,16 @@ class HttpCampusTransport(private val api: CampusApi, private val isCurrent: (Cr
         if (auth != null && !body.ok && isSessionExpiry(body.displayMessage)) {
             onExpired(auth); throw ApiFailure(body.errorCode, "登录已失效，请重新登录", true)
         }
-        // A business rejection arrived over HTTP 200; its errorCode is not an HTTP status.
-        if (!body.ok) onDiagnostic(operationFor(path), FailureCategory.REJECTED, HttpClass.UNKNOWN, RecoveryResult.NOT_NEEDED)
         return body
         } catch (error: kotlinx.coroutines.CancellationException) {
             throw error
         } catch (error: Exception) {
-            val http = ((error as? ApiFailure) ?: (error.cause as? ApiFailure))?.code?.let(::httpClass) ?: HttpClass.UNKNOWN
-            onDiagnostic(operationFor(path), failureCategory(error), http, RecoveryResult.FAILED)
             if (error is QueryHttpFailure)
                 throw AppFailure(feedbackOperationFor(path), FailureStage.RESPONSE, FailureReason.REJECTED, error)
             if (error is java.io.IOException || error is kotlinx.serialization.SerializationException)
                 throw classifyFailure(error, feedbackOperationFor(path), FailureStage.NETWORK)
             throw error
         }
-    }
-
-    fun reportRecovery(path: String) = onDiagnostic(operationFor(path), FailureCategory.NETWORK, HttpClass.UNKNOWN, RecoveryResult.RECOVERED)
-
-    private fun httpClass(code: Int) = when (code / 100) {
-        1 -> HttpClass.INFORMATIONAL; 2 -> HttpClass.SUCCESS; 3 -> HttpClass.REDIRECT
-        4 -> HttpClass.CLIENT_ERROR; 5 -> HttpClass.SERVER_ERROR; else -> HttpClass.UNKNOWN
     }
 
     private fun feedbackOperationFor(path: String) = when {
@@ -95,16 +82,6 @@ class HttpCampusTransport(private val api: CampusApi, private val isCurrent: (Cr
         path.contains("downRate") -> FailureOperation.START
         path.startsWith("order/") -> FailureOperation.FINISH
         else -> FailureOperation.PROFILE
-    }
-
-    private fun operationFor(path: String) = when {
-        path.startsWith("account/info") || path.startsWith("project/info") || path.startsWith("user/phone") || path.startsWith("user/password") -> NetworkOperation.ACCOUNT
-        path.startsWith("user/") -> NetworkOperation.LOGIN
-        path.startsWith("account/wallet") -> NetworkOperation.WALLET
-        path.contains("bill") -> NetworkOperation.BILL
-        path.startsWith("device/") -> NetworkOperation.DEVICE
-        path.startsWith("order/") -> NetworkOperation.SESSION
-        else -> NetworkOperation.ACCOUNT
     }
 }
 val ApiResponse<*>.ok get() = success && (errorCode == null || errorCode == 0)

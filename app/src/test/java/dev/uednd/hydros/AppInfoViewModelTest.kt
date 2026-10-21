@@ -1,11 +1,8 @@
 package dev.uednd.hydros
 
-import dev.uednd.hydros.data.analytics.ResultCode
 import dev.uednd.hydros.data.update.*
 import dev.uednd.hydros.ui.state.AppInfoViewModel
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -78,8 +75,7 @@ class AppInfoViewModelTest {
                 override fun takeLaunchIntent(): android.content.Intent? = null
                 override fun restoreLaunchIntent(intent: android.content.Intent) = Unit
             }
-            val analytics = RecordingAnalyticsTracker()
-            val model = AppInfoViewModel(AppUpdateSource { AppRelease("9.0.0", "v9.0.0", "") }, installer, analytics)
+            val model = AppInfoViewModel(AppUpdateSource { AppRelease("9.0.0", "v9.0.0", "") }, installer)
             models.put("updates", model)
             runCurrent()
             model.installUpdate(); runCurrent()
@@ -88,54 +84,7 @@ class AppInfoViewModelTest {
             assertFalse(model.updates.value.install.error!!.contains("raw"))
             model.installUpdate(); runCurrent()
             assertEquals(2, starts)
-            assertEquals(listOf(ResultCode.FAILURE, ResultCode.FAILURE), analytics.installResults)
         } finally { models.clear(); runCurrent(); Dispatchers.resetMain() }
-    }
-
-    @Test fun cancelledInstallIsNotReportedAsSuccess() = runTest {
-        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        try {
-            val installer = FakeInstaller()
-            val analytics = RecordingAnalyticsTracker()
-            val model = AppInfoViewModel(AppUpdateSource { null }, installer, analytics)
-            runCurrent()
-            installer.emitted.value = InstallState(InstallPhase.DOWNLOADING, canCancel = true)
-            runCurrent()
-            // Cancelling clears the task: idle without an error is not a successful install.
-            installer.emitted.value = InstallState()
-            runCurrent()
-            assertTrue(analytics.installResults.isEmpty())
-        } finally { Dispatchers.resetMain() }
-    }
-
-    @Test fun completedInstallIsReportedOnceOnTheNextLaunch() = runTest {
-        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        try {
-            val installer = FakeInstaller(completed = true)
-            val analytics = RecordingAnalyticsTracker()
-            AppInfoViewModel(AppUpdateSource { null }, installer, analytics)
-            runCurrent()
-            assertEquals(listOf(ResultCode.SUCCESS), analytics.installResults)
-
-            AppInfoViewModel(AppUpdateSource { null }, installer, analytics)
-            runCurrent()
-            assertEquals("the completion marker is one-shot", listOf(ResultCode.SUCCESS), analytics.installResults)
-        } finally { Dispatchers.resetMain() }
-    }
-
-    @Test fun installFailureIsReportedWithoutBeingMistakenForSuccess() = runTest {
-        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        try {
-            val installer = FakeInstaller()
-            val analytics = RecordingAnalyticsTracker()
-            AppInfoViewModel(AppUpdateSource { null }, installer, analytics)
-            runCurrent()
-            installer.emitted.value = InstallState(InstallPhase.INSTALLING)
-            runCurrent()
-            installer.emitted.value = InstallState(error = "安装失败")
-            runCurrent()
-            assertEquals(listOf(ResultCode.FAILURE), analytics.installResults)
-        } finally { Dispatchers.resetMain() }
     }
 
     @Test fun installerStateResumeAndPendingIntentFlowThroughTheViewModel() = runTest {
@@ -169,16 +118,4 @@ class AppInfoViewModelTest {
         } finally { models.clear(); runCurrent(); Dispatchers.resetMain() }
     }
 
-}
-
-private class FakeInstaller(initial: InstallState = InstallState(), var completed: Boolean = false) : AppInstaller {
-    val emitted = MutableStateFlow(initial)
-    override val state: StateFlow<InstallState> = emitted
-    override suspend fun refresh() = emitted.value
-    override suspend fun start(release: AppRelease) = emitted.value
-    override suspend fun continueInstall() = emitted.value
-    override suspend fun cancel() = Unit
-    override fun consumeInstallCompleted(): Boolean = completed.also { completed = false }
-    override fun takeLaunchIntent(): android.content.Intent? = null
-    override fun restoreLaunchIntent(intent: android.content.Intent) = Unit
 }

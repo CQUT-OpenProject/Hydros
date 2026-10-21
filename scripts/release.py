@@ -66,12 +66,6 @@ def source(tag, root=ROOT):
                 epoch=run("git", "show", "-s", "--format=%ct", commit, cwd=root))
 
 
-def firebase(path):
-    config = json.loads(path.read_text())
-    require(any(client.get("client_info", {}).get("android_client_info", {}).get("package_name") == PACKAGE
-                for client in config.get("client", [])), f"Firebase config must register {PACKAGE}")
-
-
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -243,7 +237,6 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("version")
     sub.add_parser("source").add_argument("--tag", required=True)
-    sub.add_parser("firebase").add_argument("path", type=Path)
     for command in ["stage", "reuse", "publish"]:
         item = sub.add_parser(command)
         item.add_argument("--directory", type=Path, default=ROOT / "release-apks")
@@ -260,8 +253,6 @@ def main():
         output(dict(version=version, version_code=version_code(version)))
     elif args.command == "source":
         output(source(args.tag))
-    elif args.command == "firebase":
-        firebase(args.path)
     elif args.command == "stage":
         stage(args.apk, args.directory, args.version, args.commit, args.certificate)
     elif args.command == "reuse":

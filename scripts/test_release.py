@@ -1,6 +1,5 @@
 """Release failures and retries must never expose a partial or replaced APK."""
 
-import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -210,14 +209,6 @@ class ReleaseTest(unittest.TestCase):
                    dict(tag_name="v99.0.1", draft=False, prerelease=True)]
         self.assertFalse(release.should_be_latest(entries, "1.2.9"))
         self.assertTrue(release.should_be_latest(entries, "1.2.11"))
-
-    def test_firebase_requires_the_application_package(self):
-        config = self.root / "google-services.json"
-        config.write_text(json.dumps({"client": []}))
-        with self.assertRaises(ValueError):
-            release.firebase(config)
-        config.write_text(json.dumps({"client": [{"client_info": {"android_client_info": {"package_name": release.PACKAGE}}}]}))
-        release.firebase(config)
 
 
 class ApkInspectionTest(unittest.TestCase):

@@ -50,11 +50,10 @@ jobs:
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
       - name: Install Android SDK packages
         run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0'
-      - name: Verify release tooling and Firebase configuration
+      - name: Verify release tooling
         run: |
           python3 -m unittest discover -s scripts -p 'test_*.py' -v
           python3 scripts/release.py version
-          python3 scripts/release.py firebase app/google-services.json
       - name: Run Lint, unit tests and compile application and UI tests
         run: ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
       - name: Upload check reports
