@@ -24,8 +24,12 @@ import dev.uednd.hydros.data.update.AppUpdateSource
 import dev.uednd.hydros.data.update.GitHubAppUpdates
 import dev.uednd.hydros.data.update.AndroidUpdateManager
 import dev.uednd.hydros.data.analytics.AnalyticsTracker
+import dev.uednd.hydros.data.analytics.CrashReporter
 import dev.uednd.hydros.data.analytics.FirebaseAnalyticsTracker
 import dev.uednd.hydros.data.analytics.NoOpAnalyticsTracker
+import dev.uednd.hydros.data.analytics.ResultCode
+import dev.uednd.hydros.data.analytics.failureCategory
+import dev.uednd.hydros.data.analytics.toRecoveryStage
 import com.google.firebase.analytics.FirebaseAnalytics
 import androidx.camera.camera2.Camera2Config
 import androidx.camera.core.CameraSelector
@@ -54,7 +58,13 @@ class HydrosDependencies(
 ) {
     private val restoration = SessionRestoration(auth, sessions)
     suspend fun restore() = restoration.restore()
-    fun sessionMonitor() = SessionMonitor(auth.credentials, sessions, orderPush())
+    fun sessionMonitor() = SessionMonitor(auth.credentials, sessions, orderPush(),
+        onRecoveryFailure = { stage, error ->
+            stage.toRecoveryStage()?.let { recoveryStage ->
+                analytics.sessionRecoveryResult(recoveryStage, ResultCode.FAILURE,
+                    sessions.session.value?.recoveryReason, failureCategory(error))
+            }
+        })
 }
 
 open class HydrosApplication : Application(), CameraXConfig.Provider {
@@ -74,7 +84,25 @@ open class HydrosApplication : Application(), CameraXConfig.Provider {
     override fun onCreate() {
         super.onCreate()
         dependencies = buildDependencies()
+        // Manifest defaults are on; gate immediately until the persisted choice is read.
+        dependencies.analytics.setCollectionEnabled(false)
+        CrashReporter.setCollectionEnabled(false)
+        restoreTelemetryConsent()
         warmUpScanner()
+    }
+
+    /**
+     * Collection follows the manifest default until onboarding and the analytics toggle are applied.
+     * The ViewModel reapplies the same choice after its state load and on every user change.
+     */
+    private fun restoreTelemetryConsent() {
+        dependencies.scope.launch {
+            val enabled = runCatching {
+                dependencies.store.onboardingCompleted() && dependencies.store.analyticsEnabled()
+            }.getOrDefault(false)
+            dependencies.analytics.setCollectionEnabled(enabled)
+            CrashReporter.setCollectionEnabled(enabled)
+        }
     }
 
     protected open fun warmUpScanner() {

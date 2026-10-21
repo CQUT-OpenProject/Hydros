@@ -32,6 +32,7 @@ class SessionMonitor(
     private val pollIntervalMillis: Long = 10_000,
     private val recoveryIntervalMillis: Long = 3_000,
     private val preparationTimeoutMillis: Long = 450_000,
+    private val onRecoveryFailure: (SessionStage, Throwable) -> Unit = { _, _ -> },
 ) {
     private data class PushTarget(
         val auth: Credentials,
@@ -130,8 +131,9 @@ class SessionMonitor(
             sessions.reconcile(credentials.value)
         } catch (error: CancellationException) {
             throw error
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             // Durable session state is retained for the next attempt.
+            sessions.session.value?.stage?.let { onRecoveryFailure(it, error) }
         }
     }
 }

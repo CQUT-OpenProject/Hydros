@@ -53,6 +53,18 @@ class SessionMonitorTest {
         assertEquals(2, sessions.reconciliations.size)
     }
 
+    @Test fun failedReconciliationReportsTheRecoveryStage() = runTest {
+        val sessions = RecordingSessions(session().copy(stage = SessionStage.CLOSE_UNCONFIRMED))
+        sessions.failure = IOException("offline")
+        val failures = mutableListOf<Pair<SessionStage, Throwable>>()
+        val monitor = SessionMonitor(MutableStateFlow(auth), sessions, RecordingPush(),
+            onRecoveryFailure = { stage, error -> failures += stage to error })
+        val watch = backgroundScope.launch { monitor.watch {} }
+        runCurrent()
+        assertEquals(listOf(SessionStage.CLOSE_UNCONFIRMED), failures.map { it.first })
+        watch.cancelAndJoin()
+    }
+
     @Test fun oldOrderSignalsAreIgnoredAfterSwitchAndCompletion() = runTest {
         val sessions = RecordingSessions(session())
         val push = RecordingPush()
