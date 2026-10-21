@@ -60,7 +60,7 @@ class AndroidUpdateManager private constructor(context: Context) : AppInstaller 
     override val state: StateFlow<InstallState> = mutable.asStateFlow()
 
     init {
-        if (task.version.isNotEmpty() && installedVersion() == task.version) clearTask()
+        if (task.version.isNotEmpty() && installedVersion() == task.version) clearTask(completed = true)
         if (task.phase == UpdatePhase.DOWNLOADING || task.phase == UpdatePhase.WAITING_NETWORK) startProgress()
         scope.launch { sweepStaleFiles() }
     }
@@ -80,6 +80,12 @@ class AndroidUpdateManager private constructor(context: Context) : AppInstaller 
         } finally {
             cancelRequested = false
         }
+    }
+
+    override fun consumeInstallCompleted(): Boolean {
+        val completed = prefs.getBoolean(KEY_COMPLETED, false)
+        if (completed) prefs.edit().remove(KEY_COMPLETED).commit()
+        return completed
     }
 
     /** Called on the main thread; consumes the one-shot intent so it cannot be launched twice. */
@@ -143,7 +149,7 @@ class AndroidUpdateManager private constructor(context: Context) : AppInstaller 
     private fun reconcile(): InstallState {
         if (!task.active) return snapshot()
         if (installedVersion() == task.version) {
-            clearTask()
+            clearTask(completed = true)
             return snapshot()
         }
         when (task.phase) {
@@ -534,7 +540,7 @@ class AndroidUpdateManager private constructor(context: Context) : AppInstaller 
         sweepStaleFiles()
     }
 
-    private fun clearTask() {
+    private fun clearTask(completed: Boolean = false) {
         permissionPrompt = false
         confirmation = null
         successReported = false
@@ -543,6 +549,9 @@ class AndroidUpdateManager private constructor(context: Context) : AppInstaller 
         abandonSession()
         apkFile(task.taskId)?.delete()
         task = UpdateTask()
+        // Installation replaces the process before the UI can observe success, so leave a
+        // one-shot marker for the next launch to report instead of guessing from an idle state.
+        if (completed) prefs.edit().putBoolean(KEY_COMPLETED, true).commit()
         prefs.edit().remove(KEY).commit()
         publish()
         sweepStaleFiles()
@@ -632,6 +641,7 @@ class AndroidUpdateManager private constructor(context: Context) : AppInstaller 
     companion object {
         private const val PREFS = "app-update-v1"
         private const val KEY = "task"
+        private const val KEY_COMPLETED = "install-completed"
         private const val JOB_ID = 0x485952
         private const val SUCCESS_RECHECK_MS = 10_000L
         private const val INSTALL_WAIT_MS = 120_000L

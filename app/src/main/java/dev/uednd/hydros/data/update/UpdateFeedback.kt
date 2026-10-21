@@ -14,6 +14,9 @@ interface AppInstaller {
     suspend fun continueInstall(): InstallState
     suspend fun cancel()
 
+    /** One-shot: the previous process finished installing the pending update. */
+    fun consumeInstallCompleted(): Boolean = false
+
     /** Settings or system-confirmation intent to launch once; null when nothing is pending. */
     fun takeLaunchIntent(): android.content.Intent?
 
