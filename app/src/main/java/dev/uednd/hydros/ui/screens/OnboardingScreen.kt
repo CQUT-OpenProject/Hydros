@@ -291,7 +291,7 @@ private fun LegalStep(
             Section {
                 SwitchRow(
                     title = "匿名使用统计",
-                    supporting = "允许 Firebase Analytics 收集去标识化的功能使用情况，可随时关闭。",
+                    supporting = "默认开启；用于 Firebase Analytics 与 Crashlytics 收集去标识化使用与崩溃信息，可随时关闭。",
                     checked = analyticsEnabled,
                     onCheckedChange = onAnalyticsEnabled,
                     switchTag = "analytics-consent"
