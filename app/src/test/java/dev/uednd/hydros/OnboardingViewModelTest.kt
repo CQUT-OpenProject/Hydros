@@ -85,14 +85,14 @@ class OnboardingViewModelTest {
     @Test
     fun declinedAnalyticsStaysOffAndAcceptedChoicePersistsAndCanBeRevoked() = runTest(dispatcher) {
         val store = MemoryStore()
-        val analytics = RecordingAnalytics()
+        val analytics = RecordingAnalyticsTracker()
         val transport = ScriptTransport(); val lock = Mutex()
         val graph = HydrosDependencies(RealAuthRepository(transport, store), RealAccountRepository(transport),
             RealWalletRepository(transport), RealDeviceRepository(transport, store, lock),
             RealSessionRepository(transport, store, lock), store, this, analytics = analytics)
         val model = HydrosViewModel(graph)
         runCurrent()
-        assertFalse(store.analyticsEnabled()) // persisted default is off before the onboarding choice
+        assertTrue(store.analyticsEnabled()) // persisted default is on; collection still waits for onboarding
 
         model.completeOnboarding(analyticsEnabled = false)
         runCurrent()
@@ -102,6 +102,8 @@ class OnboardingViewModelTest {
         model.setAnalyticsEnabled(true)
         assertTrue("启用选择应立即放开 Analytics 收集", analytics.enabledState)
         runCurrent()
+        assertEquals(listOf(true), analytics.consents)
+        assertEquals(listOf(true), analytics.consentStates)
         assertTrue(store.analyticsEnabled())
         assertTrue(analytics.enabledState)
 
@@ -115,17 +117,8 @@ class OnboardingViewModelTest {
         runCurrent()
         assertFalse(analytics.enabledState)
         assertFalse(store.analyticsEnabled())
+        assertEquals(listOf(true, false), analytics.consents)
+        // The opt-out is recorded while collection is still on; it could not be sent afterwards.
+        assertEquals(listOf(true, true), analytics.consentStates)
     }
-}
-
-private class RecordingAnalytics : AnalyticsTracker {
-    var enabledState = false
-    override fun setCollectionEnabled(enabled: Boolean) { enabledState = enabled }
-    override fun onboardingComplete() = Unit
-    override fun nearbyScanResult(result: ResultCode, discoveredCount: Int, failure: FailureCategory?) = Unit
-    override fun qrScanResult(result: ResultCode, failure: FailureCategory?) = Unit
-    override fun deviceConnectResult(result: ResultCode, channel: Channel, deviceType: DeviceType, failure: FailureCategory?) = Unit
-    override fun sessionStartResult(result: ResultCode, channel: Channel, deviceType: DeviceType, failure: FailureCategory?) = Unit
-    override fun sessionFinishResult(result: ResultCode, channel: Channel, deviceType: DeviceType, failure: FailureCategory?) = Unit
-    override fun networkFailure(operation: NetworkOperation, failure: FailureCategory, httpClass: HttpClass, recovery: RecoveryResult) = Unit
 }
