@@ -9,7 +9,8 @@ import dev.uednd.hydros.ui.theme.*
 
 @Preview(name="设备空记录", showBackground=true, widthDp=393, heightDp=850)
 @Composable private fun EmptyHome() = HydrosTheme(ThemeMode.LIGHT) {
-    Surface { HomeScreen(HydrosUiState(initializing=false, signedIn=true), {}, {}, {}, {}, {}) }
+    Surface { HomeScreen(HydrosUiState(initializing=false, signedIn=true),
+        onScan = {}, onDevice = {}, onSession = {}, onScanNearby = {}, onStopNearby = {}) }
 }
 @Preview(name="钱包未加载", showBackground=true, widthDp=393, heightDp=850)
 @Composable private fun EmptyWallet() = HydrosTheme(ThemeMode.DARK) {

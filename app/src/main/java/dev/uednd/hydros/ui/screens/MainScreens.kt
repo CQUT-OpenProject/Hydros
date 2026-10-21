@@ -19,7 +19,9 @@ import dev.uednd.hydros.ui.state.*
 import dev.uednd.hydros.ui.theme.ThemeMode
 
 @Composable
-fun HomeScreen(state: HydrosUiState, onScan: () -> Unit, onDevice: (String) -> Unit, onSession: () -> Unit, onScanNearby: () -> Unit, onStopNearby: () -> Unit) {
+fun HomeScreen(state: HydrosUiState, onScan: () -> Unit, onDevice: (String) -> Unit,
+    onSession: () -> Unit, onScanNearby: () -> Unit, onStopNearby: () -> Unit,
+    onNearbyDevice: (String) -> Unit = onDevice) {
     val haptics = rememberHydrosHaptics()
     val connected = state.connectedDeviceIds.mapNotNull { id -> state.devices.find { it.id == id } }
     val favorites = connected.filter { it.id in state.favoriteDeviceIds }
@@ -56,7 +58,7 @@ fun HomeScreen(state: HydrosUiState, onScan: () -> Unit, onDevice: (String) -> U
         } else Section("收藏设备 · ${favorites.size}") {
             favorites.forEach { device -> DeviceRow(device, state.deviceRemarks) { onDevice(device.id) } }
         }
-        NearbyDevices(state.nearby, state.devices, onScanNearby, onStopNearby, onDevice, state.deviceRemarks)
+        NearbyDevices(state.nearby, state.devices, onScanNearby, onStopNearby, onNearbyDevice, state.deviceRemarks)
     }
 }
 

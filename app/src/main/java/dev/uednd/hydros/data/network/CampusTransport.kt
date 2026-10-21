@@ -60,6 +60,7 @@ class HttpCampusTransport(private val api: CampusApi, private val isCurrent: (Cr
         if (auth != null && !body.ok && isSessionExpiry(body.displayMessage)) {
             onExpired(auth); throw ApiFailure(body.errorCode, "登录已失效，请重新登录", true)
         }
+        // A business rejection arrived over HTTP 200; its errorCode is not an HTTP status.
         if (!body.ok) onDiagnostic(operationFor(path), FailureCategory.REJECTED, HttpClass.UNKNOWN, RecoveryResult.NOT_NEEDED)
         return body
         } catch (error: kotlinx.coroutines.CancellationException) {

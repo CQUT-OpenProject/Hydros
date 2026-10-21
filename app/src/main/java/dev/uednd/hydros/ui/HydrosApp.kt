@@ -51,6 +51,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModel
 import androidx.compose.ui.platform.LocalContext
 import dev.uednd.hydros.data.HydrosApplication
+import dev.uednd.hydros.data.analytics.AppScreen
+import dev.uednd.hydros.data.analytics.ConnectEntry
 import dev.uednd.hydros.data.storage.PostSessionDestination
 import android.os.Build
 import android.Manifest
@@ -233,6 +235,21 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
     val entry by nav.currentBackStackEntryAsState()
     val navigationRoute = entry?.destination?.route ?: "home"
     val route = if (navigationRoute == "home") destinations[pageState.currentPage].route else navigationRoute
+    LaunchedEffect(route, pageState.settledPage) {
+        // Do not gate on signedIn: the login screen is only reachable while signed out, and it is
+        // the first step of the documented funnel. Consent already controls collection itself.
+        val screen = when {
+            route == "login" -> AppScreen.LOGIN
+            route == "scan" -> AppScreen.SCAN
+            navigationRoute == "device/{id}" -> AppScreen.DEVICE
+            route == "session" -> AppScreen.SESSION
+            route == "wallet" -> AppScreen.WALLET
+            navigationRoute == "bill/{id}" -> AppScreen.BILL_DETAIL
+            route == "about/update" -> AppScreen.ABOUT_UPDATE
+            else -> null
+        }
+        screen?.let(model.graph.analytics::appScreen)
+    }
     LaunchedEffect(entry?.id, state.signedIn) {
         if (!state.signedIn || entry?.destination?.route != "device/{id}" ||
             permissionTarget?.id != entry?.arguments?.getString("id")) permissionTarget = null
@@ -355,7 +372,9 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                                     key = { destinations[it].route }
                                 ) { page ->
                                     primaryStates.SaveableStateProvider(destinations[page].route) {
-                                        if (page == 0) HomeScreen(state, onScan = { openPage("scan") }, onDevice = { openPage("device/$it") },
+                                        if (page == 0) HomeScreen(state, onScan = { openPage("scan") },
+                                            onDevice = { model.scheduleConnect(ConnectEntry.LIST); openPage("device/$it") },
+                                            onNearbyDevice = { model.scheduleConnect(ConnectEntry.NEARBY); openPage("device/$it") },
                                             onSession = { openPage("session") },
                                             onScanNearby = model::discoverNearby, onStopNearby = model::stopDiscovery)
                                         else WalletScreen(state, onMonth = model::loadMonth, onBillType = model::selectBillType, onRefresh = model::refresh, onBill = { billFromSession = false; openPage("bill/$it") })
@@ -492,7 +511,10 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                         composable("scan") {
                             HydrosPage("扫码连接", onBack = { back() }) {
                                 ScanScreen(onResolve = model::scan, enabled = state.signedIn && state.reauthentication == null,
-                                    queryProgress = state.networkMessage) { openPage("device/$it") }
+                                    queryProgress = state.networkMessage) {
+                                    model.scheduleConnect(ConnectEntry.QR)
+                                    openPage("device/$it")
+                                }
                             }
                         }
                         composable("session") {
