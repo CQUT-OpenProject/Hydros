@@ -21,7 +21,7 @@ import java.time.Instant
 class SoftwareUpdateScreenTest {
     @get:Rule val ui = createComposeRule()
     private val release = AppRelease("0.2.0", "v0.2.0", "## 新增\n- 完整的软件更新体验\n- 支持应用内查看更新历史", publishedAt = "2026-10-15T00:00:00Z",
-        assets = listOf(ReleaseAsset("Hydros-universal.apk", "https://github.com/UE-DND/Hydros/releases/download/v0.2.0/app.apk", 100, null)))
+        assets = listOf(ReleaseAsset("Hydros-universal.apk", "https://github.com/CQUT-OpenProject/Hydros/releases/download/v0.2.0/app.apk", 100, null)))
 
     private fun screenshot(name: String) {
         val dir = File(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null), "update-screenshots").apply { mkdirs() }

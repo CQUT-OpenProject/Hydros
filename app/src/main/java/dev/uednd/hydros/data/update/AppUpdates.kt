@@ -19,8 +19,10 @@ import okhttp3.Request
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
-const val HYDROS_REPOSITORY = "https://github.com/UE-DND/Hydros"
+const val HYDROS_GITHUB_REPO = "CQUT-OpenProject/Hydros"
+const val HYDROS_REPOSITORY = "https://github.com/$HYDROS_GITHUB_REPO"
 const val HYDROS_RELEASES = "$HYDROS_REPOSITORY/releases"
+private const val HYDROS_RELEASE_DOWNLOAD_PREFIX = "$HYDROS_RELEASES/download/"
 
 data class ReleaseAsset(val name: String, val url: String, val size: Long, val sha256: String?)
 
@@ -43,7 +45,7 @@ fun interface AppUpdateSource {
 /** Only published, stable GitHub releases can announce an update. */
 class GitHubAppUpdates(
     private val client: OkHttpClient = OkHttpClient.Builder().retryOnConnectionFailure(false).callTimeout(15, TimeUnit.SECONDS).build(),
-    private val endpoint: String = "https://api.github.com/repos/UE-DND/Hydros/releases/latest",
+    private val endpoint: String = "https://api.github.com/repos/$HYDROS_GITHUB_REPO/releases/latest",
 ) : AppUpdateSource {
     override suspend fun latest(): AppRelease? = withContext(Dispatchers.IO) {
         request(endpoint, allowMissing = true)?.let { parseUpdateData { parseRelease(it.jsonObject) } }
@@ -111,7 +113,7 @@ internal fun parseRelease(json: JsonObject): AppRelease? {
         val asset = element.jsonObject
         val name = asset["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
         val url = asset["browser_download_url"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-        if (!name.endsWith(".apk", ignoreCase = true) || !url.startsWith("https://github.com/UE-DND/Hydros/releases/download/")) return@mapNotNull null
+        if (!name.endsWith(".apk", ignoreCase = true) || !url.startsWith(HYDROS_RELEASE_DOWNLOAD_PREFIX)) return@mapNotNull null
         ReleaseAsset(name, url, asset["size"]?.jsonPrimitive?.longOrNull ?: 0,
             asset["digest"]?.jsonPrimitive?.contentOrNull?.takeIf { it.matches(Regex("sha256:[a-fA-F0-9]{64}")) }?.substringAfter(':'))
     }

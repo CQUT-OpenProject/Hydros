@@ -112,7 +112,7 @@ class MarkdownRenderingTest {
 
                             ~~旧说明~~
 
-                            [打开项目](https://github.com/UE-DND/Hydros)
+                            [打开项目](https://github.com/CQUT-OpenProject/Hydros)
                         """.trimIndent())
                     }
                 }
@@ -124,7 +124,7 @@ class MarkdownRenderingTest {
         ui.onNodeWithText("完成", substring = true).assertExists()
         ui.onNodeWithText("旧说明").assertExists()
         ui.onNodeWithText("打开项目").performScrollTo().performClick()
-        ui.runOnIdle { assertEquals("https://github.com/UE-DND/Hydros", opened) }
+        ui.runOnIdle { assertEquals("https://github.com/CQUT-OpenProject/Hydros", opened) }
     }
 
     private fun waitFor(text: String, substring: Boolean = false) {

@@ -10,7 +10,7 @@ class UpdateTaskTest {
     @Test fun inFlightTaskRoundTripsThroughPersistedJson() {
         val task = UpdateTask(
             phase = UpdatePhase.INSTALLING, taskId = "task", version = "1.2.0",
-            url = "https://github.com/UE-DND/Hydros/releases/download/v1.2.0/app.apk", size = 100,
+            url = "https://github.com/CQUT-OpenProject/Hydros/releases/download/v1.2.0/app.apk", size = 100,
             sha256 = "a".repeat(64), downloadId = 7, sessionId = 3, versionCode = 10200, committed = true,
             committedAt = 1_600_000_000_000,
         )

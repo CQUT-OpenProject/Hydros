@@ -31,7 +31,7 @@ class AppUpdatesTest {
         val server = MockWebServer(); server.start()
         try {
             val source = GitHubAppUpdates(endpoint = server.url("/releases/latest").toString())
-            val release = """{"draft":false,"prerelease":false,"tag_name":"v0.2.0","name":"Hydros 0.2.0","published_at":"2026-10-15T00:00:00Z","assets":[{"name":"app.apk","size":123,"browser_download_url":"https://github.com/UE-DND/Hydros/releases/download/v0.2.0/app.apk","digest":"sha256:${"ab".repeat(32)}"},{"name":"bad.apk","browser_download_url":"https://example.com/bad.apk"}]}"""
+            val release = """{"draft":false,"prerelease":false,"tag_name":"v0.2.0","name":"Hydros 0.2.0","published_at":"2026-10-15T00:00:00Z","assets":[{"name":"app.apk","size":123,"browser_download_url":"https://github.com/CQUT-OpenProject/Hydros/releases/download/v0.2.0/app.apk","digest":"sha256:${"ab".repeat(32)}"},{"name":"bad.apk","browser_download_url":"https://example.com/bad.apk"}]}"""
             server.enqueue(MockResponse.Builder().body(release).build())
             val latest = source.latest()!!
             assertEquals("Hydros 0.2.0", latest.name)
@@ -56,7 +56,7 @@ class AppUpdatesTest {
             val release = source.latest()!!
             assertEquals("0.2.0", release.version)
             assertEquals("更新说明", release.notes)
-            assertEquals("https://github.com/UE-DND/Hydros/releases/tag/v0.2.0", release.url)
+            assertEquals("https://github.com/CQUT-OpenProject/Hydros/releases/tag/v0.2.0", release.url)
             server.enqueue(MockResponse.Builder().code(404).build())
             assertNull(source.latest())
             server.enqueue(MockResponse.Builder().code(403).build())

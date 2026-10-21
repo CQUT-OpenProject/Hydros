@@ -98,7 +98,7 @@ fun SoftwareUpdateScreen(
         Section("更多信息") {
             MineRow("更新历史", icon = R.drawable.ic_history, tone = IconTone.PRIMARY, onClick = onHistory)
             SubtleDivider()
-            MineRow("源代码仓库", supporting = "UE-DND/Hydros", icon = R.drawable.ic_code,
+            MineRow("源代码仓库", supporting = HYDROS_GITHUB_REPO, icon = R.drawable.ic_code,
                 onClick = { uri.openUri(HYDROS_REPOSITORY) }, trailing = { Glyph(R.drawable.ic_open_in_new, Modifier.size(18.dp)) })
         }
     }
