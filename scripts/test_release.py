@@ -215,7 +215,7 @@ class ApkInspectionTest(unittest.TestCase):
     def test_rejects_wrong_abi_signature_version_and_missing_license(self):
         with tempfile.TemporaryDirectory() as directory:
             apk = Path(directory) / "app.apk"
-            badging = "package: name='dev.uednd.hydros' versionCode='1000' versionName='0.1.0'"
+            badging = "package: name='org.cqutosp.hydros' versionCode='1000' versionName='0.1.0'"
             signature = f"Verified using v2 scheme (APK Signature Scheme v2): true\nSigner #1 certificate SHA-256 digest: {CERTIFICATE}"
             cases = [({"arm64-v8a"}, CERTIFICATE, badging, True, True),
                      ({"arm64-v8a", "x86_64"}, CERTIFICATE, badging, True, False),

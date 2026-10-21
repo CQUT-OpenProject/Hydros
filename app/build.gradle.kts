@@ -53,11 +53,11 @@ androidComponents.onVariants { variant ->
 }
 
 android {
-    namespace = "dev.uednd.hydros"
+    namespace = "org.cqutosp.hydros"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "dev.uednd.hydros"
+        applicationId = "org.cqutosp.hydros"
         minSdk = 31
         targetSdk = 35
         versionCode = hydrosVersionCode.toInt()
@@ -68,7 +68,7 @@ android {
 
         val defaultBaseUrl = String(byteArrayOf(104, 116, 116, 112, 115, 58, 47, 47, 118, 51, 45, 97, 112, 105, 46, 99, 104, 105, 110, 97, 45, 113, 122, 120, 121, 46, 99, 110, 47), Charsets.UTF_8)
         buildConfigField("String", "CAMPUS_BASE_URL", "\"${providers.gradleProperty("campusBaseUrl").getOrElse(defaultBaseUrl)}\"")
-        testInstrumentationRunner = "dev.uednd.hydros.OfflineTestRunner"
+        testInstrumentationRunner = "org.cqutosp.hydros.OfflineTestRunner"
     }
 
     signingConfigs {

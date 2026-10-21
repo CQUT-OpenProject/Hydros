@@ -15,7 +15,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
-PACKAGE = "dev.uednd.hydros"
+PACKAGE = "org.cqutosp.hydros"
 
 
 def require(condition, message):

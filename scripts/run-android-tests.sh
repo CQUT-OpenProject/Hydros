@@ -24,14 +24,14 @@ capture() {
   timeout 10s adb shell ps -A > "$reports/processes.txt" 2>&1 || true
   timeout 10s adb exec-out screencap -p > "$reports/screenshot.png" 2>/dev/null || true
   local app_pid
-  app_pid=$(timeout 10s adb shell pidof dev.uednd.hydros | tr -d '\r') || true
+  app_pid=$(timeout 10s adb shell pidof org.cqutosp.hydros | tr -d '\r') || true
   if [[ -n "$app_pid" ]]; then
-    timeout 10s adb shell run-as dev.uednd.hydros kill -3 "$app_pid" 2>/dev/null || true
+    timeout 10s adb shell run-as org.cqutosp.hydros kill -3 "$app_pid" 2>/dev/null || true
   fi
 }
 
 timeout --signal=TERM --kill-after=30s 15m ./gradlew --no-daemon :app:connectedDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.notClass=dev.uednd.hydros.CellularRecoveryTest &
+  -Pandroid.testInstrumentationRunnerArguments.notClass=org.cqutosp.hydros.CellularRecoveryTest &
 test_pid=$!
 (
   while kill -0 "$test_pid" 2>/dev/null; do
