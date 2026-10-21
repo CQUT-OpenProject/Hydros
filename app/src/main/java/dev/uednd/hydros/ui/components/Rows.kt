@@ -1,6 +1,10 @@
 package dev.uednd.hydros.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
@@ -8,9 +12,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -18,6 +26,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import dev.uednd.hydros.R
+
+/** Flat section-row fill: pressed on-surface 15%, hovered on-surface 8%. */
+@Composable
+internal fun sectionRowSurfaceColor(active: Boolean, pressed: Boolean, hovered: Boolean): Color {
+    val colors = MaterialTheme.colorScheme
+    val base = colors.surface
+    return when {
+        !active -> base
+        pressed -> colors.onSurface.copy(alpha = 0.15f).compositeOver(base)
+        hovered -> colors.onSurface.copy(alpha = 0.08f).compositeOver(base)
+        else -> base
+    }
+}
 
 @Composable
 fun StatusBadge(
@@ -135,23 +156,18 @@ fun MineRow(
         }
     }
 
-    if (onClick != null) {
-        Surface(
-            onClick = onClick,
-            shape = MaterialTheme.shapes.small, // 12.dp
-            color = MaterialTheme.colorScheme.surface,
-            modifier = modifier.fillMaxWidth()
-        ) {
-            content()
-        }
-    } else {
-        Surface(
-            shape = MaterialTheme.shapes.small,
-            color = MaterialTheme.colorScheme.surface,
-            modifier = modifier.fillMaxWidth()
-        ) {
-            content()
-        }
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
+    val rowModifier = if (onClick != null) {
+        Modifier.clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
+    } else Modifier
+    Surface(
+        shape = RectangleShape,
+        color = sectionRowSurfaceColor(onClick != null, pressed, hovered),
+        modifier = modifier.fillMaxWidth().then(rowModifier)
+    ) {
+        content()
     }
 }
 
@@ -201,12 +217,17 @@ fun RadioRow(
     enabled: Boolean = true
 ) {
     val haptics = rememberHydrosHaptics()
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.small)
+            .background(sectionRowSurfaceColor(enabled, pressed, hovered))
             .selectable(
                 selected = selected,
+                interactionSource = interaction,
+                indication = null,
                 enabled = enabled,
                 role = Role.RadioButton,
                 onClick = { if (!selected) { haptics.light(); onClick() } }
@@ -300,13 +321,18 @@ fun SwitchRow(
     switchTag: String? = null
 ) {
     val haptics = rememberHydrosHaptics()
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.small)
+            .background(sectionRowSurfaceColor(enabled, pressed, hovered))
             .then(if (switchTag != null) Modifier.testTag(switchTag) else Modifier)
             .toggleable(
                 value = checked,
+                interactionSource = interaction,
+                indication = null,
                 enabled = enabled,
                 role = Role.Switch,
                 onValueChange = {

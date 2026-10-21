@@ -326,8 +326,7 @@ private fun PermissionsStep(
                 .fillMaxWidth()
                 .fillMaxHeight()
                 .verticalScroll(rememberScrollState())
-                // Keep the card border and shadow inside the scroll viewport.
-                // This padding also remains reachable below the last permission.
+                // Keep scroll padding so the last permission stays inside the viewport.
                 .padding(horizontal = 24.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterVertically)
         ) {

@@ -79,7 +79,7 @@ fun SegmentedControl(
         color = colors.surface,
         border = BorderStroke(1.dp, colors.outlineVariant)
     ) {
-        BoxWithConstraints(Modifier.padding(if (compact) 2.dp else 6.dp)) {
+        BoxWithConstraints(Modifier.padding(if (compact) 2.dp else 4.dp)) {
             val segmentWidth = maxWidth / options.size
             val transition = updateTransition(selectedIndex ?: 0, label = "分栏选择")
             val start by transition.animateDp(

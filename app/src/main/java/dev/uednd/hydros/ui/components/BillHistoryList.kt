@@ -10,6 +10,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.uednd.hydros.R
 import dev.uednd.hydros.ui.state.BillUi
@@ -33,9 +34,16 @@ fun LazyListScope.billHistoryList(
 
     item("bills-heading", "heading") {
         var showMonths by rememberSaveable { mutableStateOf(false) }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("账单记录", Modifier.weight(1f).padding(start = 8.dp),
-                style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "账单记录",
+                Modifier.weight(1f).padding(start = 16.dp, end = 8.dp),
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Normal),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             TextButton(onClick = { showMonths = true }) {
                 Text("${selectedMonth.year}年${selectedMonth.monthValue}月")
                 Glyph(R.drawable.ic_chevron, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -83,8 +91,7 @@ fun LazyListScope.billHistoryList(
         ) { index, bill ->
             LazySectionItem(
                 first = index == 0,
-                last = index == monthBills.lastIndex,
-                showBorder = false
+                last = index == monthBills.lastIndex
             ) {
                 BillRow(bill, if (bill.detailAvailable) ({ onBill(bill.id) }) else null)
                 if (index < monthBills.lastIndex) SubtleDivider()
