@@ -44,6 +44,26 @@ class NearbyDiscoveryTest {
         assertFalse(discovery.state.value.searching)
     }
 
+    @Test fun accountSwitchKeepsTheScanGenerationMonotonic() = runTest {
+        val scanner = ScriptScanner()
+        val credentials = MutableStateFlow<Credentials?>(auth)
+        val discovery = NearbyDiscovery(scanner, lookup { _, _, _ -> device("same-device") }, credentials, backgroundScope)
+        discovery.start()
+        runCurrent()
+        val first = discovery.state.value.scanGeneration
+        advanceTimeBy(15_000)
+        runCurrent()
+
+        credentials.value = Credentials("other", "4", "5", "6", "13900139000")
+        runCurrent()
+        assertEquals("observers key on the generation, so a reset must not reuse it",
+            first, discovery.state.value.scanGeneration)
+
+        discovery.start()
+        runCurrent()
+        assertEquals(first + 1, discovery.state.value.scanGeneration)
+    }
+
     @Test fun scanWindowStopsRadioButWaitsForAcceptedRegistrationQuery() = runTest {
         val scanner = ScriptScanner()
         val gate = CompletableDeferred<DeviceUi>()
@@ -116,13 +136,14 @@ class NearbyDiscoveryTest {
         runCurrent()
         scanner.emit(first)
         runCurrent()
+        val generation = discovery.state.value.scanGeneration
         credentials.value = auth.copy(accountId = "another")
         runCurrent()
         assertEquals(0, scanner.active)
-        assertEquals(NearbyDiscoveryState(), discovery.state.value)
+        assertEquals(NearbyDiscoveryState(scanGeneration = generation), discovery.state.value)
         gate.complete(Unit)
         runCurrent()
-        assertEquals(NearbyDiscoveryState(), discovery.state.value)
+        assertEquals(NearbyDiscoveryState(scanGeneration = generation), discovery.state.value)
     }
 
     @Test fun scanFailureCancelsQueriesReleasesScannerAndCanRetry() = runTest {

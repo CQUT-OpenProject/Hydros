@@ -21,6 +21,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 
 data class NearbyDiscoveryState(
+    val scanGeneration: Long = 0,
     val searching: Boolean = false,
     val hasSearched: Boolean = false,
     val completed: Boolean = false,
@@ -55,7 +56,8 @@ class NearbyDiscovery(
         val owner = Any()
         attempt = owner
         job?.cancel()
-        mutable.value = NearbyDiscoveryState(searching = true, hasSearched = true)
+        val generation = state.value.scanGeneration + 1
+        mutable.value = NearbyDiscoveryState(scanGeneration = generation, searching = true, hasSearched = true)
         fun ownsAttempt() = attempt === owner && credentials.value == auth
 
         job = scope.launch {
@@ -111,7 +113,10 @@ class NearbyDiscovery(
     }
 
     private fun reset() {
+        // Keep the generation monotonic across account switches: observers compare it with their
+        // last reported value, which does not reset with the credentials.
+        val generation = mutable.value.scanGeneration
         stop()
-        mutable.value = NearbyDiscoveryState()
+        mutable.value = NearbyDiscoveryState(scanGeneration = generation)
     }
 }
