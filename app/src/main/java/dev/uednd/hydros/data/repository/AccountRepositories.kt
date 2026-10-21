@@ -11,7 +11,9 @@ import kotlinx.serialization.json.*
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
-data class ReauthenticationNotice(val id: Long, val message: String)
+enum class ReauthenticationReason { EXPIRED, ACCOUNT_CHANGED }
+data class ReauthenticationNotice(val id: Long, val message: String,
+    val reason: ReauthenticationReason = ReauthenticationReason.EXPIRED)
 data class AuthState(val credentials: Credentials? = null, val reauthentication: ReauthenticationNotice? = null)
 
 @OptIn(kotlinx.coroutines.InternalCoroutinesApi::class)
@@ -67,10 +69,11 @@ class RealAuthRepository(private val transport: CampusTransport, private val sto
             if(type == 3) null else requireCredentials()).requireSuccess()
     }
     override suspend fun logout() = lock.withLock { store.credentials(null); current.value = AuthState() }
-    suspend fun expire(expected: Credentials, message: String = "登录已失效，请重新登录") = lock.withLock {
+    suspend fun expire(expected: Credentials, message: String = "登录已失效，请重新登录",
+        reason: ReauthenticationReason = ReauthenticationReason.EXPIRED) = lock.withLock {
         if(current.value.credentials == expected) {
             store.credentials(null)
-            current.value = AuthState(reauthentication = ReauthenticationNotice(++noticeSequence, message))
+            current.value = AuthState(reauthentication = ReauthenticationNotice(++noticeSequence, message, reason))
         }
     }
     override suspend fun acknowledgeReauthentication(id: Long) = lock.withLock {
@@ -80,7 +83,7 @@ class RealAuthRepository(private val transport: CampusTransport, private val sto
         val auth = requireCredentials()
         transport.post("user/phone/update", mapOf("newTelephone" to newPhone, "code" to code), auth).requireSuccess()
         // Re-authenticate after changing the identity fields; never invent a replacement loginCode.
-        expire(auth, "手机号已修改，请重新登录")
+        expire(auth, "手机号已修改，请重新登录", ReauthenticationReason.ACCOUNT_CHANGED)
     }
     override suspend fun savePassword(old: String?, password: String, code: String?) {
         val auth = requireCredentials()
