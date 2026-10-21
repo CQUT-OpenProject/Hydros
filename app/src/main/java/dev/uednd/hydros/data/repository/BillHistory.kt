@@ -8,12 +8,17 @@ import java.time.YearMonth
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
+data class BillDetailState(val fetching: Boolean = false, val error: Exception? = null)
+
 data class BillHistoryState(
     val month: String = YearMonth.now().toString(),
     val type: BillType = BillType.CONSUMPTION,
     val bills: List<BillUi> = emptyList(),
     val loading: Boolean = false,
     val error: Exception? = null,
+    val details: Map<String, BillDetailState> = emptyMap(),
+    /** Snapshot of the bill whose detail page is open, so it survives list changes. */
+    val detailBill: BillUi? = null,
 )
 
 /** Main-thread owner of account-scoped queries, their cache, and the selected bill history. */
@@ -25,15 +30,12 @@ class BillHistory(
 ) {
     // A failed query must not cancel other queries or the caller's scope.
     private val scope = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
-    private data class Query(val month: String, val type: BillType)
-    private data class CachedBills(val bills: List<BillUi>, val loadedAt: Long, val version: Any = Any())
+    private val store = BillEntityStore(nowMillis)
 
     private val mutable = MutableStateFlow(BillHistoryState())
     val state = mutable.asStateFlow()
-    // Memory only: five minutes from a successful response, at most 24 month/type queries.
-    private val cache = linkedMapOf<Query, CachedBills>()
-    private val requests = mutableMapOf<Query, Deferred<List<BillUi>>>()
-    private val details = mutableSetOf<Deferred<Unit>>()
+    private val requests = mutableMapOf<BillQueryKey, Deferred<List<BillUi>>>()
+    private val detailJobs = mutableMapOf<String, Deferred<Unit>>()
     private var selection: Job? = null
     private var owner: Credentials? = null
     private var epoch = 0
@@ -51,43 +53,65 @@ class BillHistory(
         selection?.cancel()
         requests.values.toList().forEach { it.cancel() }
         requests.clear()
-        details.toList().forEach { it.cancel() }
-        details.clear()
-        cache.clear()
+        detailJobs.values.toList().forEach { it.cancel() }
+        detailJobs.clear()
+        store.clear()
         mutable.value = BillHistoryState()
     }
 
     fun selectMonth(month: String) {
         synchronizeAccount()
-        load(Query(month, state.value.type))
+        load(BillQueryKey(month, state.value.type))
     }
 
     fun selectType(type: BillType) {
         synchronizeAccount()
-        if (state.value.type != type) load(Query(state.value.month, type))
+        if (state.value.type != type) load(BillQueryKey(state.value.month, type))
     }
 
     fun refresh() {
         synchronizeAccount()
-        load(Query(state.value.month, state.value.type), force = true)
+        load(BillQueryKey(state.value.month, state.value.type), force = true)
     }
 
-    private fun load(query: Query, force: Boolean = false) {
+    private fun publishBills(
+        loading: Boolean = state.value.loading,
+        error: Exception? = state.value.error,
+        bills: List<BillUi>? = null,
+    ) {
+        val current = state.value
+        val query = BillQueryKey(current.month, current.type)
+        val projected = bills ?: store.projectedBills(query) ?: current.bills.map { store.bill(it.id) ?: it }
+        mutable.value = current.copy(
+            bills = projected,
+            detailBill = current.detailBill?.let { store.bill(it.id) ?: it },
+            loading = loading,
+            error = error,
+        )
+    }
+
+    private fun setDetailSync(id: String, sync: BillDetailState) {
+        mutable.value = state.value.copy(details = state.value.details + (id to sync))
+    }
+
+    private fun clearDetailSync(id: String) {
+        if (id !in state.value.details) return
+        mutable.value = state.value.copy(details = state.value.details - id)
+    }
+
+    private fun load(query: BillQueryKey, force: Boolean = false, resetDetail: Boolean = force) {
         selection?.cancel()
         val auth = owner
         val queryChanged = state.value.month != query.month || state.value.type != query.type
         mutable.value = state.value.copy(month = query.month, type = query.type)
         if (auth == null) return
         if (force) {
-            cache.remove(query)
+            store.removeQuery(query)
             requests.remove(query)?.cancel()
         }
-        cache[query]?.let { cached ->
-            if (nowMillis() - cached.loadedAt in 0 until 5 * 60_000L) {
-                mutable.value = state.value.copy(bills = cached.bills, loading = false, error = null)
-                return
-            }
-            cache.remove(query)
+        if (store.isQueryFresh(query)) {
+            publishBills(loading = false, error = null)
+            return
         }
         val request = requests[query] ?: run {
             val startedIn = epoch
@@ -95,8 +119,7 @@ class BillHistory(
                 val bills = wallet.bills(auth, query.month, query.type)
                 ensureActive()
                 if (startedIn == epoch && credentials.value == auth) {
-                    cache[query] = CachedBills(bills, nowMillis())
-                    while (cache.size > 24) cache.remove(cache.keys.first())
+                    store.rememberQuery(query, bills, nowMillis(), resetDetail = resetDetail)
                 }
                 bills
             }
@@ -105,16 +128,20 @@ class BillHistory(
             pending.start()
             pending
         }
-        mutable.value = state.value.copy(bills = if (queryChanged) emptyList() else state.value.bills, loading = true, error = null)
+        publishBills(
+            loading = true,
+            error = null,
+            bills = if (queryChanged) emptyList() else null,
+        )
         selection = scope.launch {
             try {
-                val bills = request.await()
+                request.await()
                 ensureActive()
-                if (credentials.value == auth) mutable.value = state.value.copy(bills = bills, loading = false)
+                if (credentials.value == auth) publishBills(loading = false)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (credentials.value == auth) mutable.value = state.value.copy(error = error, loading = false)
+                if (credentials.value == auth) publishBills(loading = false, error = error)
             }
         }
     }
@@ -131,9 +158,8 @@ class BillHistory(
             ?.let(YearMonth::from)
         val months = listOfNotNull(consumedMonth, YearMonth.now()).map(YearMonth::toString).distinct()
         for (month in months) {
-            val query = Query(month, BillType.CONSUMPTION)
+            val query = BillQueryKey(month, BillType.CONSUMPTION)
             val bills = try {
-                // Reuse a request the session-end refresh may have already started for this query.
                 requests[query]?.takeIf { it.isActive }?.await() ?: wallet.bills(auth, month, BillType.CONSUMPTION)
             } catch (error: CancellationException) {
                 throw error
@@ -141,13 +167,11 @@ class BillHistory(
                 continue
             }
             if (credentials.value != auth) return null
-            cache[query] = CachedBills(bills, nowMillis())
-            while (cache.size > 24) cache.remove(cache.keys.first())
+            store.rememberQuery(query, bills, nowMillis())
             bills.firstOrNull { it.matchesFinishedSession(session) }?.let { bill ->
-                // Publish only a confirmed match, replacing whichever month was being browsed.
                 selection?.cancel()
-                mutable.value = state.value.copy(month = month, type = BillType.CONSUMPTION,
-                    bills = bills, loading = false, error = null)
+                mutable.value = state.value.copy(month = month, type = BillType.CONSUMPTION)
+                publishBills(loading = false, error = null)
                 return bill
             }
         }
@@ -162,38 +186,50 @@ class BillHistory(
         return time == consumedAt
     }
 
-    suspend fun loadDetail(id: String) {
+    suspend fun loadDetail(id: String, force: Boolean = false) {
         synchronizeAccount()
         val auth = owner ?: return
-        val bill = state.value.bills.find { it.id == id && it.detailAvailable } ?: return
-        val query = Query(state.value.month, state.value.type)
-        val cached = cache[query] ?: CachedBills(state.value.bills, nowMillis()).also {
-            cache[query] = it
-            while (cache.size > 24) cache.remove(cache.keys.first())
+        val bill = store.bill(id) ?: state.value.bills.find { it.id == id } ?: return
+        mutable.value = state.value.copy(detailBill = bill)
+        if (!bill.detailAvailable) return
+        if (!force && store.isDetailFresh(id)) return
+
+        detailJobs[id]?.let { existing ->
+            if (existing.isActive) {
+                // Share the running request; a forced retry still refreshes afterwards.
+                existing.await()
+                if (!force) return
+            }
         }
-        val version = cached.version
+
+        val query = BillQueryKey(state.value.month, state.value.type)
+        val expectedVersion = store.queryVersion(query)
+        val target = store.bill(id) ?: bill
         val startedIn = epoch
         val pending = scope.async(start = CoroutineStart.LAZY) {
-            val detail = wallet.detail(auth, bill)
-            ensureActive()
-            val current = cache[query]
-            if (startedIn == epoch && credentials.value == auth && (current == null || current.version === version)) {
-                // Detail updates preserve the query version, so concurrent details can both be retained.
-                val updated = (current ?: cached).let { base ->
-                    base.copy(bills = base.bills.map { if (it.id == id) detail else it })
-                }
-                cache[query] = updated
-                if (state.value.month == query.month && state.value.type == query.type) {
-                    mutable.value = state.value.copy(bills = updated.bills)
+            setDetailSync(id, BillDetailState(fetching = true))
+            try {
+                val detail = wallet.detail(auth, target)
+                ensureActive()
+                if (startedIn != epoch || credentials.value != auth) return@async
+                val fetchedAt = nowMillis()
+                val applied = expectedVersion != null &&
+                    store.applyDetail(id, detail, query, expectedVersion, fetchedAt)
+                if (!applied) store.applyDetailWithoutQuery(id, detail, fetchedAt)
+                publishBills()
+                clearDetailSync(id)
+            } catch (error: CancellationException) {
+                clearDetailSync(id)
+                throw error
+            } catch (error: Exception) {
+                if (startedIn == epoch && credentials.value == auth) {
+                    setDetailSync(id, BillDetailState(error = error))
                 }
             }
         }
-        details += pending
-        pending.invokeOnCompletion { details.remove(pending) }
-        try {
-            pending.await()
-        } finally {
-            pending.cancel()
-        }
+        detailJobs[id] = pending
+        pending.invokeOnCompletion { if (detailJobs[id] === pending) detailJobs.remove(id) }
+        pending.start()
+        pending.await()
     }
 }

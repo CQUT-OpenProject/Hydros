@@ -168,10 +168,16 @@ fun MineScreen(
 }
 
 @Composable
-fun BillDetailScreen(bill: BillUi?, onWallet: () -> Unit, loading: Boolean = false, error: String? = null, onRetry: () -> Unit = {}, backLabel: String = "返回钱包") {
-    SnackbarMessage(if (bill == null) "未找到账单，请返回${backLabel.removePrefix("返回")}查看其他记录" else null)
+fun BillDetailScreen(
+    bill: BillUi?,
+    onWallet: () -> Unit,
+    durationPending: Boolean = false,
+    error: String? = null,
+    onRetry: () -> Unit = {},
+    backLabel: String = "返回钱包",
+) {
+    SnackbarMessage(if (bill == null && error == null) "未找到账单，请返回${backLabel.removePrefix("返回")}查看其他记录" else null)
     PageColumn {
-        if (loading) InlineState("正在加载账单详情", loading = true)
         error?.let { StateCard("账单详情未更新", it, action = "重新查询", onAction = onRetry) }
         if (bill == null) SecondaryAction(backLabel, onClick = onWallet)
         else {
@@ -189,9 +195,9 @@ fun BillDetailScreen(bill: BillUi?, onWallet: () -> Unit, loading: Boolean = fal
                 InfoRow(if (bill.recharge) "支付方式" else "位置", bill.location)
                 SubtleDivider()
                 InfoRow("时间", bill.time.toLocalDate().toString() + " " + bill.time.toLocalTime().withNano(0))
-                if (!bill.recharge && bill.durationText != null) {
+                if (!bill.recharge && (bill.durationText != null || durationPending)) {
                     SubtleDivider()
-                    InfoRow("使用时长", bill.durationText)
+                    InfoRow("使用时长", bill.durationText ?: "查询中…")
                 }
                 SubtleDivider()
                 InfoRow("订单编号", bill.id)

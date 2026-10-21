@@ -508,10 +508,19 @@ fun HydrosApp(model: HydrosViewModel = hydrosViewModel(), appInfo: AppInfoViewMo
                             val billId = backStack.arguments?.getString("id")
                             LaunchedEffect(backStack.id) { billId?.let(model::loadDetail) }
                             HydrosPage("账单详情", onBack = { back() }) {
-                                val currentBill = state.bills.find { it.id == billId } ?: remember(billId) { state.bills.find { it.id == billId } }
-                                BillDetailScreen(currentBill, onWallet = { if (state.reauthentication == null) nav.popBackStack("home", inclusive = false) },
+                                val currentBill = billId?.let { id ->
+                                    state.billDetail?.takeIf { it.id == id } ?: state.bills.find { it.id == id }
+                                }
+                                val detailSync = billId?.let { state.billDetailSync[it] }
+                                BillDetailScreen(
+                                    bill = currentBill,
+                                    onWallet = { if (state.reauthentication == null) nav.popBackStack("home", inclusive = false) },
                                     backLabel = if (billFromSession) "返回首页" else "返回钱包",
-                                    loading = state.detailLoading && state.detailId == billId, error = state.detailError.takeIf { state.detailId == billId }, onRetry = { billId?.let(model::loadDetail) })
+                                    durationPending = currentBill != null && !currentBill.recharge &&
+                                        currentBill.durationText == null && detailSync?.fetching == true,
+                                    error = detailSync?.error,
+                                    onRetry = { billId?.let { model.loadDetail(it, force = true) } },
+                                )
                             }
                         }
                         composable("account/{form}") { backStack ->

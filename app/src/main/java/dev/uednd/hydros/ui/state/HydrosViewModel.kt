@@ -38,8 +38,8 @@ data class HydrosUiState(val initializing: Boolean = true, val signedIn: Boolean
     val messageAction: RecoveryAction? = null, val connectionAction: RecoveryAction? = null,
     val networkMessage: String? = null, val connectionMessage: String? = null,
     val walletLoading: Boolean = false, val walletLoaded: Boolean = false, val accountError: String? = null,
-    val detailId: String? = null, val deviceActionError: String? = null,
-    val detailLoading: Boolean = false, val detailError: String? = null,
+    val deviceActionError: String? = null,
+    val billDetail: BillUi? = null, val billDetailSync: Map<String, BillDetailUi> = emptyMap(),
     val walletError: String? = null, val billsError: String? = null, val message: String? = null, val working: Boolean = false,
     val postSessionDestination: PostSessionDestination = PostSessionDestination.DEVICE,
     val resolvingPostSessionDestination: Boolean = false, val postSessionBillId: String? = null)
@@ -52,7 +52,6 @@ class HydrosViewModel(
     private val refreshJobs = mutableListOf<Job>()
     private val billHistory = BillHistory(graph.wallet, graph.auth.credentials, viewModelScope)
     private var walletGeneration = 0
-    private var detailGeneration = 0
     private val discovery = NearbyDiscovery(graph.nearbyScanner, graph.devices, graph.auth.credentials, viewModelScope)
     private val preparation = DevicePreparation(
         graph.auth, graph.devices, graph.sessions, graph.store, viewModelScope,
@@ -66,7 +65,11 @@ class HydrosViewModel(
             billHistory.state.collect { history ->
                 mutable.update { it.copy(month = history.month, billType = history.type,
                     bills = history.bills, loadingBills = history.loading,
-                    billsError = history.error?.let(::friendly)) }
+                    billsError = history.error?.let(::friendly),
+                    billDetail = history.detailBill,
+                    billDetailSync = history.details.mapValues { (_, detail) ->
+                        BillDetailUi(detail.fetching, detail.error?.let { failureFeedback(it, FailureOperation.DETAIL).text })
+                    }) }
             }
         }
         graph.networkRecovery?.let { recovery ->
@@ -111,7 +114,6 @@ class HydrosViewModel(
                     refreshJobs.forEach { it.cancel() }; refreshJobs.clear()
                     preparation.cancel()
                     walletGeneration++
-                    detailGeneration++
                     if (authentication.reauthentication != null) {
                         mutable.update { it.copy(signedIn = false, reauthentication = authentication.reauthentication,
                             initializing = false, loadingBills = false,
@@ -401,8 +403,9 @@ class HydrosViewModel(
         if (!current.signedIn || current.reauthentication != null || current.working) return
         if ((current.accountError != null || current.walletError != null || current.billsError != null) &&
             !current.walletLoading && !current.loadingBills && refreshJobs.none { it.isActive }) refresh()
-        if (visibleBillId != null && current.detailId == visibleBillId && current.detailError != null && !current.detailLoading)
-            loadDetail(visibleBillId)
+        val detail = visibleBillId?.let { current.billDetailSync[it] }
+        if (visibleBillId != null && detail?.error != null && detail.fetching != true)
+            loadDetail(visibleBillId, force = true)
     }
     fun refresh() {
         val auth = graph.auth.credentials.value ?: return
@@ -429,19 +432,9 @@ class HydrosViewModel(
     }
     fun loadMonth(month: String) = billHistory.selectMonth(month)
     fun selectBillType(type: BillType) = billHistory.selectType(type)
-    fun loadDetail(id: String) {
-        val owner = graph.auth.credentials.value
-        val generation = ++detailGeneration
-        viewModelScope.launch {
-            mutable.update { it.copy(detailLoading=true, detailError=null, detailId=id) }
-            try { billHistory.loadDetail(id) }
-            catch (error: CancellationException) { throw error }
-            catch (error: Exception) {
-                if (owner == graph.auth.credentials.value && generation == detailGeneration) mutable.update { it.copy(detailError=failureFeedback(error, FailureOperation.DETAIL).text) }
-            } finally {
-                if (owner == graph.auth.credentials.value && generation == detailGeneration) mutable.update { it.copy(detailLoading=false) }
-            }
-        }
+
+    fun loadDetail(id: String, force: Boolean = false) {
+        viewModelScope.launch { billHistory.loadDetail(id, force = force) }
     }
 }
 private fun DeviceCategory.toAnalyticsType() = when (this) {

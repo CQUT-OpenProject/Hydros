@@ -50,6 +50,8 @@ data class BillUi(val id: String, val title: String, val location: String, val c
     val amountCents get() = amountMilli?.let(::displayCents)
     val month: YearMonth get() = YearMonth.from(time)
 }
+/** Per-bill detail status, with any failure already mapped to user-facing text. */
+data class BillDetailUi(val fetching: Boolean = false, val error: String? = null)
 fun displayCents(milli: Long): Long = BigDecimal.valueOf(milli, 1).setScale(0, RoundingMode.HALF_UP).longValueExact()
 fun money(cents: Long?): String = cents?.let { BigDecimal.valueOf(it, 2).setScale(2).toPlainString() } ?: "—"
 fun elapsed(seconds: Long): String = "%02d:%02d".format(Locale.CHINA, seconds / 60, seconds % 60)

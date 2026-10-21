@@ -14,7 +14,7 @@ import org.junit.Test
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class BillHistoryViewModelTest {
-    @Test fun projectsSelectionDetailsErrorsAndAccountResetIntoUiState() = runTest {
+    @Test fun projectsSelectionDetailsAndAccountResetIntoUiState() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val store = MemoryStore().apply { auth = Credentials("token", "1", "2", "3", "13800138000") }
         val transport = ScriptTransport().apply {
@@ -38,6 +38,8 @@ class BillHistoryViewModelTest {
             model.loadDetail("bill")
             runCurrent()
             assertEquals("3分钟", model.state.value.bills.single().durationText)
+            assertEquals("3分钟", model.state.value.billDetail?.durationText)
+            assertTrue(model.state.value.billDetailSync.isEmpty())
             assertFalse(model.state.value.working)
             model.selectBillType(BillType.RECHARGE)
             runCurrent()
@@ -56,6 +58,8 @@ class BillHistoryViewModelTest {
             assertFalse(model.state.value.signedIn)
             assertTrue(model.state.value.bills.isEmpty())
             assertNull(model.state.value.billsError)
+            assertNull(model.state.value.billDetail)
+            assertTrue(model.state.value.billDetailSync.isEmpty())
         } finally {
             models.clear()
             runCurrent()

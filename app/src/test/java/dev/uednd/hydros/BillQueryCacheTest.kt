@@ -184,7 +184,7 @@ class BillQueryCacheTest {
         assertEquals(2, f.queries.count { it["month"] == "2024-01" })
     }
 
-    @Test fun lateDetailCannotOverwriteARefreshedListOrItsCache() = testCache { f ->
+    @Test fun lateDetailAddsDurationWithoutOverwritingARefreshedList() = testCache { f ->
         val pending = CompletableDeferred<Unit>()
         var amount = "0.50"
         f.transport.script = { path, fields ->
@@ -203,13 +203,14 @@ class BillQueryCacheTest {
         runCurrent()
         pending.complete(Unit)
         detail.join()
+        // The refreshed list keeps its own fields; only the detail-only fields are merged in.
         assertEquals(1000L, f.history.state.value.bills.single().amountMilli)
-        assertNull(f.history.state.value.bills.single().durationText)
+        assertEquals("旧详情", f.history.state.value.bills.single().durationText)
         f.history.selectType(BillType.RECHARGE)
         runCurrent()
         f.history.selectType(BillType.CONSUMPTION)
         assertEquals(1000L, f.history.state.value.bills.single().amountMilli)
-        assertNull(f.history.state.value.bills.single().durationText)
+        assertEquals("旧详情", f.history.state.value.bills.single().durationText)
     }
 
     @Test fun concurrentDetailsMergeWithoutDiscardingEarlierUpdates() = testCache { f ->
@@ -237,17 +238,17 @@ class BillQueryCacheTest {
         assertEquals(listOf("a", "b"), f.history.state.value.bills.map { it.durationText })
     }
 
-    @Test fun detailForAnotherMonthUpdatesOnlyThatMonthsCache() = testCache { f ->
+    @Test fun detailAppliesToEntityAcrossMonthQueries() = testCache { f ->
         val pending = CompletableDeferred<Unit>()
         f.transport.script = { path, fields ->
             if (path.endsWith("bill/detail")) {
                 pending.await()
                 response("""{"consumeMoney":"0.50","usingTimeDisplay":"3分钟"}""")
-            } else billList(fields.getValue("month"))
+            } else billList(fields.getValue("month"), orderId = "bill-${fields.getValue("month")}")
         }
         f.history.selectMonth("2025-01")
         runCurrent()
-        val detail = launch { f.history.loadDetail("bill") }
+        val detail = launch { f.history.loadDetail("bill-2025-01") }
         runCurrent()
         f.history.selectMonth("2025-02")
         runCurrent()
@@ -258,6 +259,34 @@ class BillQueryCacheTest {
         f.history.selectMonth("2025-01")
         assertEquals("3分钟", f.history.state.value.bills.single().durationText)
         assertEquals(1, f.queries.count { it["month"] == "2025-01" })
+    }
+
+    @Test fun detailFreshWithinTtlSkipsNetwork() = testCache { f ->
+        val month = f.history.state.value.month
+        var detailCalls = 0
+        f.transport.script = { path, fields ->
+            if (path.endsWith("bill/detail")) {
+                detailCalls++
+                response("""{"consumeMoney":"0.50","usingTimeDisplay":"3分钟"}""")
+            } else if (fields["billRequestType"] == "1") response("[]")
+            else billList(fields.getValue("month"))
+        }
+        f.history.refresh()
+        runCurrent()
+        f.history.loadDetail("bill")
+        runCurrent()
+        assertEquals(1, detailCalls)
+        f.history.loadDetail("bill")
+        runCurrent()
+        assertEquals(1, detailCalls)
+        advanceTimeBy(299_999)
+        f.history.loadDetail("bill")
+        runCurrent()
+        assertEquals(1, detailCalls)
+        advanceTimeBy(2)
+        f.history.loadDetail("bill")
+        runCurrent()
+        assertEquals(2, detailCalls)
     }
 
     @Test fun logoutCancelsDetailsAndCannotRestoreThePreviousAccountsData() = testCache { f ->
@@ -397,7 +426,7 @@ class BillQueryCacheTest {
         assertEquals(1, f.history.state.value.bills.size)
     }
 
-    private fun billList(month: String, amount: String = "0.50") = response("""
-        [{"consumeBillDTO":{"orderId":"bill","consumeDate":"$month-01 12:00:00","consumeMoney":"$amount"}}]
+    private fun billList(month: String, amount: String = "0.50", orderId: String = "bill") = response("""
+        [{"consumeBillDTO":{"orderId":"$orderId","consumeDate":"$month-01 12:00:00","consumeMoney":"$amount"}}]
     """.trimIndent())
 }
