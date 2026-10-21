@@ -289,6 +289,152 @@ class BillQueryCacheTest {
         assertEquals(2, detailCalls)
     }
 
+    @Test fun detailStatusShowsFetchingThenClearsOnSuccess() = testCache { f ->
+        val pending = CompletableDeferred<Unit>()
+        f.transport.script = { path, fields ->
+            if (path.endsWith("bill/detail")) {
+                pending.await()
+                response("""{"consumeMoney":"0.50","usingTimeDisplay":"3分钟"}""")
+            } else if (fields["billRequestType"] == "1") response("[]")
+            else billList(fields.getValue("month"))
+        }
+        f.history.refresh()
+        runCurrent()
+        val detail = launch { f.history.loadDetail("bill") }
+        runCurrent()
+        assertEquals(true, f.history.state.value.details.getValue("bill").fetching)
+        pending.complete(Unit)
+        detail.join()
+        assertNull(f.history.state.value.details["bill"])
+        assertEquals("3分钟", f.history.state.value.detailBill?.durationText)
+    }
+
+    @Test fun detailFailureIsReportedAndForcedRetryRecovers() = testCache { f ->
+        var failing = true
+        var detailCalls = 0
+        f.transport.script = { path, fields ->
+            if (path.endsWith("bill/detail")) {
+                detailCalls++
+                if (failing) throw java.io.IOException("offline")
+                response("""{"consumeMoney":"0.50","usingTimeDisplay":"3分钟"}""")
+            } else if (fields["billRequestType"] == "1") response("[]")
+            else billList(fields.getValue("month"))
+        }
+        f.history.refresh()
+        runCurrent()
+        f.history.loadDetail("bill")
+        runCurrent()
+        val failed = f.history.state.value.details.getValue("bill")
+        assertNotNull(failed.error)
+        assertFalse(failed.fetching)
+        failing = false
+        f.history.loadDetail("bill", force = true)
+        runCurrent()
+        assertNull(f.history.state.value.details["bill"])
+        assertEquals("3分钟", f.history.state.value.detailBill?.durationText)
+        assertEquals(2, detailCalls)
+    }
+
+    @Test fun incompleteDetailWithoutDurationIsQueriedAgainOnReopen() = testCache { f ->
+        var detailCalls = 0
+        f.transport.script = { path, fields ->
+            if (path.endsWith("bill/detail")) {
+                detailCalls++
+                response("""{"consumeMoney":"0.50"}""")
+            } else if (fields["billRequestType"] == "1") response("[]")
+            else billList(fields.getValue("month"))
+        }
+        f.history.refresh()
+        runCurrent()
+        f.history.loadDetail("bill")
+        runCurrent()
+        f.history.loadDetail("bill")
+        runCurrent()
+        assertEquals(2, detailCalls)
+    }
+
+    @Test fun forcedDetailReloadBypassesTheFreshWindow() = testCache { f ->
+        var detailCalls = 0
+        f.transport.script = { path, fields ->
+            if (path.endsWith("bill/detail")) {
+                detailCalls++
+                response("""{"consumeMoney":"0.50","usingTimeDisplay":"3分钟"}""")
+            } else if (fields["billRequestType"] == "1") response("[]")
+            else billList(fields.getValue("month"))
+        }
+        f.history.refresh()
+        runCurrent()
+        f.history.loadDetail("bill")
+        runCurrent()
+        f.history.loadDetail("bill", force = true)
+        runCurrent()
+        assertEquals(2, detailCalls)
+    }
+
+    @Test fun concurrentDetailsForOneBillShareASingleRequest() = testCache { f ->
+        val pending = CompletableDeferred<Unit>()
+        var detailCalls = 0
+        f.transport.script = { path, fields ->
+            if (path.endsWith("bill/detail")) {
+                detailCalls++
+                pending.await()
+                response("""{"consumeMoney":"0.50","usingTimeDisplay":"3分钟"}""")
+            } else if (fields["billRequestType"] == "1") response("[]")
+            else billList(fields.getValue("month"))
+        }
+        f.history.refresh()
+        runCurrent()
+        val first = launch { f.history.loadDetail("bill") }
+        val second = launch { f.history.loadDetail("bill") }
+        runCurrent()
+        assertEquals(1, detailCalls)
+        pending.complete(Unit)
+        joinAll(first, second)
+        assertEquals(1, detailCalls)
+        assertEquals("3分钟", f.history.state.value.detailBill?.durationText)
+    }
+
+    @Test fun detailBillSnapshotSurvivesMonthSwitchAndRefresh() = testCache { f ->
+        f.transport.script = { path, fields ->
+            if (path.endsWith("bill/detail")) {
+                response("""{"consumeMoney":"0.50","usingTimeDisplay":"3分钟"}""")
+            } else if (fields["billRequestType"] == "1") response("[]")
+            else billList(fields.getValue("month"), orderId = "bill-${fields.getValue("month")}")
+        }
+        f.history.selectMonth("2025-01")
+        runCurrent()
+        f.history.loadDetail("bill-2025-01")
+        runCurrent()
+        f.history.selectMonth("2025-02")
+        runCurrent()
+        assertEquals("bill-2025-01", f.history.state.value.detailBill?.id)
+        assertEquals("3分钟", f.history.state.value.detailBill?.durationText)
+        f.history.refresh()
+        runCurrent()
+        assertEquals("bill-2025-01", f.history.state.value.detailBill?.id)
+        assertEquals("3分钟", f.history.state.value.detailBill?.durationText)
+    }
+
+    @Test fun forcedRefreshClearsRememberedDetailsSoTheNextOpenRefetches() = testCache { f ->
+        var detailCalls = 0
+        f.transport.script = { path, fields ->
+            if (path.endsWith("bill/detail")) {
+                detailCalls++
+                response("""{"consumeMoney":"0.50","usingTimeDisplay":"3分钟"}""")
+            } else if (fields["billRequestType"] == "1") response("[]")
+            else billList(fields.getValue("month"))
+        }
+        f.history.refresh()
+        runCurrent()
+        f.history.loadDetail("bill")
+        runCurrent()
+        f.history.refresh()
+        runCurrent()
+        f.history.loadDetail("bill")
+        runCurrent()
+        assertEquals(2, detailCalls)
+    }
+
     @Test fun logoutCancelsDetailsAndCannotRestoreThePreviousAccountsData() = testCache { f ->
         val pending = CompletableDeferred<Unit>()
         f.transport.script = { path, fields ->
